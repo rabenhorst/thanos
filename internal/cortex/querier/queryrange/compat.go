@@ -34,17 +34,17 @@ func (s *SampleHistogramPair) UnmarshalJSON(buf []byte) error {
 	return nil
 }
 
-//func (s SampleHistogram) MarshalJSON() ([]byte, error) {
-//	count, err := json.Marshal(s.Count)
-//	if err != nil {
-//		return nil, err
-//	}
-//	sum, err := json.Marshal(s.Sum)
-//	if err != nil {
-//		return nil, err
-//	}
-//	return []byte(fmt.Sprintf("[%s,%s]", c, s)), nil
-//}
+func (s SampleHistogram) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Count   model.FloatString  `json:"count"`
+		Sum     model.FloatString  `json:"sum"`
+		Buckets []*HistogramBucket `json:"buckets"`
+	}{
+		Count:   model.FloatString(s.Count),
+		Sum:     model.FloatString(s.Sum),
+		Buckets: s.Buckets,
+	})
+}
 
 func (s *SampleHistogram) UnmarshalJSON(buf []byte) error {
 	var sampleHistogram struct {
@@ -78,7 +78,7 @@ func (s HistogramBucket) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []byte(fmt.Sprintf("[%s,%s,%s,%s]", b, l, u, c)), nil
+	return []byte(fmt.Sprintf("[%s,\"%s\",\"%s\",\"%s\"]", b, l, u, c)), nil
 }
 
 func (s *HistogramBucket) UnmarshalJSON(buf []byte) error {

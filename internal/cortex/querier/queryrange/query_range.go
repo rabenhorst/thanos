@@ -426,9 +426,9 @@ func (s *SampleStream) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *Sample) UnmarshalJSON(data []byte) error {
 	var sample struct {
-		Metric    model.Metric        `json:"metric"`
-		Value     cortexpb.Sample     `json:"value"`
-		Histogram SampleHistogramPair `json:"histogram"`
+		Metric    model.Metric         `json:"metric"`
+		Value     *cortexpb.Sample     `json:"value"`
+		Histogram *SampleHistogramPair `json:"histogram"`
 	}
 	if err := json.Unmarshal(data, &sample); err != nil {
 		return err
@@ -442,9 +442,9 @@ func (s *Sample) UnmarshalJSON(data []byte) error {
 // MarshalJSON implements json.Marshaler.
 func (s *Sample) MarshalJSON() ([]byte, error) {
 	sample := struct {
-		Metric    model.Metric        `json:"metric"`
-		Value     cortexpb.Sample     `json:"value"`
-		Histogram SampleHistogramPair `json:"histogram"`
+		Metric    model.Metric         `json:"metric"`
+		Value     *cortexpb.Sample     `json:"value,omitempty"`
+		Histogram *SampleHistogramPair `json:"histogram,omitempty"`
 	}{
 		Metric:    cortexpb.FromLabelAdaptersToMetric(s.Labels),
 		Value:     s.Sample,

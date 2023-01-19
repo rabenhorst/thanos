@@ -13,8 +13,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/gogo/protobuf/types"
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/histogram"
-	"github.com/prometheus/prometheus/tsdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/weaveworks/common/user"
@@ -104,7 +102,7 @@ var (
 					Histograms: []SampleHistogramPair{
 						{
 							Timestamp: 1536673680000,
-							Histogram: histogramToHistogramProto(tsdb.GenerateTestHistograms(1)[0]),
+							Histogram: genSampleHistogram(),
 						},
 					},
 				},
@@ -1351,18 +1349,41 @@ func (mockCacheGenNumberLoader) GetResultsCacheGenNumber(tenantIDs []string) str
 	return ""
 }
 
-func histogramToHistogramProto(h *histogram.Histogram) *SampleHistogram {
-	return nil
-}
-
-func spansToSpansProto(s []histogram.Span) []*cortexpb.BucketSpan {
-	if len(s) == 0 {
-		return nil
+func genSampleHistogram() *SampleHistogram {
+	return &SampleHistogram{
+		Count: 5,
+		Sum:   18.4,
+		Buckets: []*HistogramBucket{
+			{
+				Boundaries: 3,
+				Lower:      -0.001,
+				Upper:      0.001,
+				Count:      2,
+			},
+			{
+				Boundaries: 0,
+				Lower:      0.7071067811865475,
+				Upper:      1,
+				Count:      1,
+			},
+			{
+				Boundaries: 0,
+				Lower:      1,
+				Upper:      1.414213562373095,
+				Count:      2,
+			},
+			{
+				Boundaries: 0,
+				Lower:      2,
+				Upper:      2.82842712474619,
+				Count:      1,
+			},
+			{
+				Boundaries: 0,
+				Lower:      2.82842712474619,
+				Upper:      4,
+				Count:      1,
+			},
+		},
 	}
-	spans := make([]*cortexpb.BucketSpan, len(s))
-	for i := 0; i < len(s); i++ {
-		spans[i] = &cortexpb.BucketSpan{Offset: s[i].Offset, Length: s[i].Length}
-	}
-
-	return spans
 }

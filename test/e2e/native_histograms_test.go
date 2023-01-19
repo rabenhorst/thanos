@@ -140,11 +140,14 @@ func TestQueryFrontendNativeHistograms(t *testing.T) {
 	queryAndAssert(t, ctx, prom1.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{}, expectedHistogramModelVector(nil))
 	queryAndAssert(t, ctx, prom2.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{}, expectedHistogramModelVector(nil))
 
+	// Make sure we can query histogram from Thanos Querier.
 	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(map[string]string{
 		"prometheus": "prom-ha",
 	}))
 
-	queryAndAssert(t, ctx, qf.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(nil))
+	queryAndAssert(t, ctx, qf.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(map[string]string{
+		"prometheus": "prom-ha",
+	}))
 }
 
 func synthesizeHistogram(ctx context.Context, rawRemoteWriteURL string) error {
