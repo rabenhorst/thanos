@@ -13,6 +13,8 @@ import (
 	"github.com/go-kit/log"
 	"github.com/gogo/protobuf/types"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/tsdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/weaveworks/common/user"
@@ -34,6 +36,14 @@ var (
 		End:   1536716898 * 1e3,
 		Step:  120 * 1e3,
 		Query: "sum(container_memory_rss) by (namespace)",
+		Stats: "all",
+	}
+	parsedHistogramRequest = &PrometheusRequest{
+		Path:  "/api/v1/query_range",
+		Start: 1536673680 * 1e3,
+		End:   1536716898 * 1e3,
+		Step:  120 * 1e3,
+		Query: "fake_histogram",
 		Stats: "all",
 	}
 	reqHeaders = []*PrometheusRequestHeader{
@@ -77,6 +87,25 @@ var (
 					Samples: []cortexpb.Sample{
 						{Value: 137, TimestampMs: 1536673680000},
 						{Value: 137, TimestampMs: 1536673780000},
+					},
+				},
+			},
+		},
+	}
+	parsedHistogramResponse = &PrometheusResponse{
+		Status: "success",
+		Data: PrometheusData{
+			ResultType: model.ValMatrix.String(),
+			Result: []SampleStream{
+				{
+					Labels: []cortexpb.LabelAdapter{
+						{Name: "fake", Value: "histogram"},
+					},
+					Histograms: []SampleHistogramPair{
+						{
+							Timestamp: 1536673680000,
+							Histogram: histogramToHistogramProto(tsdb.GenerateTestHistograms(1)[0]),
+						},
 					},
 				},
 			},
@@ -1264,6 +1293,49 @@ func TestResultsCacheShouldCacheFunc(t *testing.T) {
 	}
 }
 
+func TestNativeHistograms(t *testing.T) {
+	calls := 0
+	cfg := ResultsCacheConfig{
+		CacheConfig: cache.Config{
+			Cache: cache.NewMockCache(),
+		},
+	}
+	rcm, _, err := NewResultsCacheMiddleware(
+		log.NewNopLogger(),
+		cfg,
+		constSplitter(day),
+		mockLimits{},
+		PrometheusCodec,
+		PrometheusResponseExtractor{},
+		nil,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+
+	rc := rcm.Wrap(HandlerFunc(func(_ context.Context, req Request) (Response, error) {
+		calls++
+		return parsedHistogramResponse, nil
+	}))
+	ctx := user.InjectOrgID(context.Background(), "1")
+	resp, err := rc.Do(ctx, parsedHistogramRequest)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	require.Equal(t, parsedHistogramResponse, resp)
+
+	// Doing same request again shouldn't change anything.
+	resp, err = rc.Do(ctx, parsedHistogramRequest)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	require.Equal(t, parsedHistogramResponse, resp)
+
+	// Doing request with new end time should do one more query.
+	req := parsedHistogramRequest.WithStartEnd(parsedHistogramRequest.GetStart(), parsedHistogramRequest.GetEnd()+100)
+	_, err = rc.Do(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+}
+
 func toMs(t time.Duration) int64 {
 	return int64(t / time.Millisecond)
 }
@@ -1277,4 +1349,20 @@ func newMockCacheGenNumberLoader() CacheGenNumberLoader {
 
 func (mockCacheGenNumberLoader) GetResultsCacheGenNumber(tenantIDs []string) string {
 	return ""
+}
+
+func histogramToHistogramProto(h *histogram.Histogram) *SampleHistogram {
+	return nil
+}
+
+func spansToSpansProto(s []histogram.Span) []*cortexpb.BucketSpan {
+	if len(s) == 0 {
+		return nil
+	}
+	spans := make([]*cortexpb.BucketSpan, len(s))
+	for i := 0; i < len(s); i++ {
+		spans[i] = &cortexpb.BucketSpan{Offset: s[i].Offset, Length: s[i].Length}
+	}
+
+	return spans
 }

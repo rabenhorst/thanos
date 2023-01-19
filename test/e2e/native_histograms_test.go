@@ -5,6 +5,7 @@ package e2e_test
 
 import (
 	"context"
+	"github.com/thanos-io/thanos/pkg/queryfrontend"
 	"testing"
 	"time"
 
@@ -101,6 +102,49 @@ func TestWriteNativeHistograms(t *testing.T) {
 	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(map[string]string{
 		"tenant_id": "default-tenant",
 	}))
+}
+
+func TestQueryFrontendNativeHistograms(t *testing.T) {
+	e, err := e2e.NewDockerEnvironment("nat-hist-qfe")
+	testutil.Ok(t, err)
+	t.Cleanup(e2ethanos.CleanScenario(t, e))
+
+	prom1, sidecar1 := e2ethanos.NewPrometheusWithSidecar(e, "ha1", e2ethanos.DefaultPromConfig("prom-ha", 0, "", "", e2ethanos.LocalPrometheusTarget), "", e2ethanos.DefaultPrometheusImage(), "", "native-histograms", "remote-write-receiver")
+	prom2, sidecar2 := e2ethanos.NewPrometheusWithSidecar(e, "ha2", e2ethanos.DefaultPromConfig("prom-ha", 1, "", "", e2ethanos.LocalPrometheusTarget), "", e2ethanos.DefaultPrometheusImage(), "", "native-histograms", "remote-write-receiver")
+	testutil.Ok(t, e2e.StartAndWaitReady(prom1, sidecar1, prom2, sidecar2))
+
+	querier := e2ethanos.NewQuerierBuilder(e, "querier", sidecar1.InternalEndpoint("grpc"), sidecar2.InternalEndpoint("grpc")).Init()
+	testutil.Ok(t, e2e.StartAndWaitReady(querier))
+
+	inMemoryCacheConfig := queryfrontend.CacheProviderConfig{
+		Type: queryfrontend.INMEMORY,
+		Config: queryfrontend.InMemoryResponseCacheConfig{
+			MaxSizeItems: 1000,
+			Validity:     time.Hour,
+		},
+	}
+
+	qf := e2ethanos.NewQueryFrontend(e, "query-frontend", "http://"+querier.InternalEndpoint("http"), queryfrontend.Config{}, inMemoryCacheConfig)
+	testutil.Ok(t, e2e.StartAndWaitReady(qf))
+
+	rawRemoteWriteURL1 := "http://" + prom1.Endpoint("http") + "/api/v1/write"
+	rawRemoteWriteURL2 := "http://" + prom2.Endpoint("http") + "/api/v1/write"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	t.Cleanup(cancel)
+
+	testutil.Ok(t, synthesizeHistogram(ctx, rawRemoteWriteURL1))
+	testutil.Ok(t, synthesizeHistogram(ctx, rawRemoteWriteURL2))
+
+	// Make sure we can query histogram from both Prometheus instances.
+	queryAndAssert(t, ctx, prom1.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{}, expectedHistogramModelVector(nil))
+	queryAndAssert(t, ctx, prom2.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{}, expectedHistogramModelVector(nil))
+
+	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(map[string]string{
+		"prometheus": "prom-ha",
+	}))
+
+	queryAndAssert(t, ctx, qf.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(nil))
 }
 
 func synthesizeHistogram(ctx context.Context, rawRemoteWriteURL string) error {

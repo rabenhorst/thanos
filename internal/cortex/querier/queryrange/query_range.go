@@ -426,27 +426,32 @@ func (s *SampleStream) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *Sample) UnmarshalJSON(data []byte) error {
 	var sample struct {
-		Metric model.Metric    `json:"metric"`
-		Value  cortexpb.Sample `json:"value"`
+		Metric    model.Metric        `json:"metric"`
+		Value     cortexpb.Sample     `json:"value"`
+		Histogram SampleHistogramPair `json:"histogram"`
 	}
 	if err := json.Unmarshal(data, &sample); err != nil {
 		return err
 	}
 	s.Labels = cortexpb.FromMetricsToLabelAdapters(sample.Metric)
 	s.Sample = sample.Value
+	s.Histogram = sample.Histogram
 	return nil
 }
 
 // MarshalJSON implements json.Marshaler.
 func (s *Sample) MarshalJSON() ([]byte, error) {
 	sample := struct {
-		Metric model.Metric    `json:"metric"`
-		Value  cortexpb.Sample `json:"value"`
+		Metric    model.Metric        `json:"metric"`
+		Value     cortexpb.Sample     `json:"value"`
+		Histogram SampleHistogramPair `json:"histogram"`
 	}{
-		Metric: cortexpb.FromLabelAdaptersToMetric(s.Labels),
-		Value:  s.Sample,
+		Metric:    cortexpb.FromLabelAdaptersToMetric(s.Labels),
+		Value:     s.Sample,
+		Histogram: s.Histogram,
 	}
-	return json.Marshal(sample)
+	b, err := json.Marshal(sample)
+	return b, err
 }
 
 // MarshalJSON implements json.Marshaler.
@@ -657,7 +662,24 @@ func matrixMerge(resps []*PrometheusResponse) []SampleStream {
 					stream.Samples = SliceSamples(stream.Samples, existingEndTs)
 				} // else there is no overlap, yay!
 			}
-			existing.Samples = append(existing.Samples, stream.Samples...)
+			// Same for histograms as for samples above.
+			if len(existing.Histograms) > 0 && len(stream.Histograms) > 0 {
+				existingEndTs := existing.Histograms[len(existing.Histograms)-1].GetTimestamp()
+				if existingEndTs == stream.Histograms[0].GetTimestamp() {
+					stream.Histograms = stream.Histograms[1:]
+				} else if existingEndTs > stream.Histograms[0].GetTimestamp() {
+					stream.Histograms = SliceHistogram(stream.Histograms, existingEndTs)
+				}
+			}
+
+			if len(stream.Samples) > 0 {
+				existing.Samples = append(existing.Samples, stream.Samples...)
+			}
+
+			if len(stream.Histograms) > 0 {
+				existing.Histograms = append(existing.Histograms, stream.Histograms...)
+			}
+
 			output[metric] = existing
 		}
 	}
@@ -694,6 +716,26 @@ func SliceSamples(samples []cortexpb.Sample, minTs int64) []cortexpb.Sample {
 	})
 
 	return samples[searchResult:]
+}
+
+// SliceHistogram assumes given histogram are sorted by timestamp in ascending order and
+// return a sub slice whose first element's is the smallest timestamp that is strictly
+// bigger than the given minTs. Empty slice is returned if minTs is bigger than all the
+// timestamps in histogram.
+func SliceHistogram(histograms []SampleHistogramPair, minTs int64) []SampleHistogramPair {
+	if len(histograms) <= 0 || minTs < histograms[0].GetTimestamp() {
+		return histograms
+	}
+
+	if len(histograms) > 0 && minTs > histograms[len(histograms)-1].GetTimestamp() {
+		return histograms[len(histograms):]
+	}
+
+	searchResult := sort.Search(len(histograms), func(i int) bool {
+		return histograms[i].GetTimestamp() > minTs
+	})
+
+	return histograms[searchResult:]
 }
 
 func parseDurationMs(s string) (int64, error) {
