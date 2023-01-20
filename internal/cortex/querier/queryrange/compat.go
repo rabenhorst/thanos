@@ -9,15 +9,7 @@ import (
 // https://github.com/prometheus/common/blob/846591a166358c7048ef197e84501ca688dda920/model/value_histogram.go#L141-L163
 
 func (s SampleHistogramPair) MarshalJSON() ([]byte, error) {
-	t, err := json.Marshal(s.Timestamp)
-	if err != nil {
-		return nil, err
-	}
-	v, err := json.Marshal(s.Histogram)
-	if err != nil {
-		return nil, err
-	}
-	return []byte(fmt.Sprintf("[%s,%s]", t, v)), nil
+	return json.Marshal(toModelSampleHistogramPair(s))
 }
 
 func (s *SampleHistogramPair) UnmarshalJSON(buf []byte) error {
@@ -99,4 +91,26 @@ func (s *HistogramBucket) UnmarshalJSON(buf []byte) error {
 	s.Count = float64(count)
 
 	return nil
+}
+
+func toModelSampleHistogramPair(s SampleHistogramPair) model.SampleHistogramPair {
+	modelBuckets := make([]*model.HistogramBucket, len(s.Histogram.Buckets))
+
+	for i, b := range s.Histogram.Buckets {
+		modelBuckets[i] = &model.HistogramBucket{
+			Lower:      model.FloatString(b.Lower),
+			Upper:      model.FloatString(b.Upper),
+			Count:      model.FloatString(b.Count),
+			Boundaries: int(b.Boundaries),
+		}
+	}
+
+	return model.SampleHistogramPair{
+		Timestamp: model.Time(s.Timestamp),
+		Histogram: model.SampleHistogram{
+			Count:   model.FloatString(s.Histogram.Count),
+			Sum:     model.FloatString(s.Histogram.Sum),
+			Buckets: modelBuckets,
+		},
+	}
 }

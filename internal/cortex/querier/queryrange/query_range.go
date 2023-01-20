@@ -400,25 +400,29 @@ func (prometheusCodec) EncodeResponse(ctx context.Context, res Response) (*http.
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *SampleStream) UnmarshalJSON(data []byte) error {
 	var stream struct {
-		Metric model.Metric      `json:"metric"`
-		Values []cortexpb.Sample `json:"values"`
+		Metric     model.Metric          `json:"metric"`
+		Values     []cortexpb.Sample     `json:"values"`
+		Histograms []SampleHistogramPair `json:"histograms"`
 	}
 	if err := json.Unmarshal(data, &stream); err != nil {
 		return err
 	}
 	s.Labels = cortexpb.FromMetricsToLabelAdapters(stream.Metric)
 	s.Samples = stream.Values
+	s.Histograms = stream.Histograms
 	return nil
 }
 
 // MarshalJSON implements json.Marshaler.
 func (s *SampleStream) MarshalJSON() ([]byte, error) {
 	stream := struct {
-		Metric model.Metric      `json:"metric"`
-		Values []cortexpb.Sample `json:"values"`
+		Metric     model.Metric          `json:"metric"`
+		Values     []cortexpb.Sample     `json:"values"`
+		Histograms []SampleHistogramPair `json:"histograms"`
 	}{
-		Metric: cortexpb.FromLabelAdaptersToMetric(s.Labels),
-		Values: s.Samples,
+		Metric:     cortexpb.FromLabelAdaptersToMetric(s.Labels),
+		Values:     s.Samples,
+		Histograms: s.Histograms,
 	}
 	return json.Marshal(stream)
 }
