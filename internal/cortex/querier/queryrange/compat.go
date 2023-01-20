@@ -1,7 +1,6 @@
 package queryrange
 
 import (
-	"fmt"
 	"github.com/prometheus/common/model"
 )
 
@@ -13,83 +12,11 @@ func (s SampleHistogramPair) MarshalJSON() ([]byte, error) {
 }
 
 func (s *SampleHistogramPair) UnmarshalJSON(buf []byte) error {
-	var t model.Time
-	tmp := []interface{}{&t, &s.Histogram}
-	wantLen := len(tmp)
-	if err := json.Unmarshal(buf, &tmp); err != nil {
+	var modelSampleHistogram model.SampleHistogramPair
+	if err := json.Unmarshal(buf, &modelSampleHistogram); err != nil {
 		return err
 	}
-	if gotLen := len(tmp); gotLen != wantLen {
-		return fmt.Errorf("wrong number of fields: %d != %d", gotLen, wantLen)
-	}
-	s.Timestamp = int64(t)
-	return nil
-}
-
-func (s SampleHistogram) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		Count   model.FloatString  `json:"count"`
-		Sum     model.FloatString  `json:"sum"`
-		Buckets []*HistogramBucket `json:"buckets"`
-	}{
-		Count:   model.FloatString(s.Count),
-		Sum:     model.FloatString(s.Sum),
-		Buckets: s.Buckets,
-	})
-}
-
-func (s *SampleHistogram) UnmarshalJSON(buf []byte) error {
-	var sampleHistogram struct {
-		Count   model.FloatString  `json:"count"`
-		Sum     model.FloatString  `json:"sum"`
-		Buckets []*HistogramBucket `json:"buckets"`
-	}
-	if err := json.Unmarshal(buf, &sampleHistogram); err != nil {
-		return err
-	}
-	s.Count = float64(sampleHistogram.Count)
-	s.Sum = float64(sampleHistogram.Sum)
-	s.Buckets = sampleHistogram.Buckets
-	return nil
-}
-
-func (s HistogramBucket) MarshalJSON() ([]byte, error) {
-	b, err := json.Marshal(s.Boundaries)
-	if err != nil {
-		return nil, err
-	}
-	l, err := json.Marshal(s.Lower)
-	if err != nil {
-		return nil, err
-	}
-	u, err := json.Marshal(s.Upper)
-	if err != nil {
-		return nil, err
-	}
-	c, err := json.Marshal(s.Count)
-	if err != nil {
-		return nil, err
-	}
-	return []byte(fmt.Sprintf("[%s,\"%s\",\"%s\",\"%s\"]", b, l, u, c)), nil
-}
-
-func (s *HistogramBucket) UnmarshalJSON(buf []byte) error {
-	var lower model.FloatString
-	var upper model.FloatString
-	var count model.FloatString
-	tmp := []interface{}{&s.Boundaries, &lower, &upper, &count}
-	wantLen := len(tmp)
-	if err := json.Unmarshal(buf, &tmp); err != nil {
-		return err
-	}
-	if gotLen := len(tmp); gotLen != wantLen {
-		return fmt.Errorf("wrong number of fields: %d != %d", gotLen, wantLen)
-	}
-
-	s.Lower = float64(lower)
-	s.Upper = float64(upper)
-	s.Count = float64(count)
-
+	fromModelSampleHistogramPair(modelSampleHistogram, s)
 	return nil
 }
 
@@ -112,5 +39,25 @@ func toModelSampleHistogramPair(s SampleHistogramPair) model.SampleHistogramPair
 			Sum:     model.FloatString(s.Histogram.Sum),
 			Buckets: modelBuckets,
 		},
+	}
+}
+
+func fromModelSampleHistogramPair(modelSampleHistogram model.SampleHistogramPair, s *SampleHistogramPair) {
+	buckets := make([]*HistogramBucket, len(modelSampleHistogram.Histogram.Buckets))
+
+	for i, b := range modelSampleHistogram.Histogram.Buckets {
+		buckets[i] = &HistogramBucket{
+			Lower:      float64(b.Lower),
+			Upper:      float64(b.Upper),
+			Count:      float64(b.Count),
+			Boundaries: int64(b.Boundaries),
+		}
+	}
+
+	s.Timestamp = int64(modelSampleHistogram.Timestamp)
+	s.Histogram = &SampleHistogram{
+		Count:   float64(modelSampleHistogram.Histogram.Count),
+		Sum:     float64(modelSampleHistogram.Histogram.Sum),
+		Buckets: buckets,
 	}
 }
