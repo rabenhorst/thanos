@@ -400,21 +400,23 @@ func (prometheusCodec) EncodeResponse(ctx context.Context, res Response) (*http.
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *SampleStream) UnmarshalJSON(data []byte) error {
 	var sampleStream model.SampleStream
-
 	if err := json.Unmarshal(data, &sampleStream); err != nil {
 		return err
 	}
+
 	s.Labels = cortexpb.FromMetricsToLabelAdapters(sampleStream.Metric)
 
-	s.Samples = make([]cortexpb.Sample, 0, len(sampleStream.Values))
-	for _, sample := range sampleStream.Values {
-		s.Samples = append(s.Samples, cortexpb.Sample{
-			Value:       float64(sample.Value),
-			TimestampMs: int64(sample.Timestamp),
-		})
+	if len(sampleStream.Values) > 0 {
+		s.Samples = make([]cortexpb.Sample, 0, len(sampleStream.Values))
+		for _, sample := range sampleStream.Values {
+			s.Samples = append(s.Samples, cortexpb.Sample{
+				Value:       float64(sample.Value),
+				TimestampMs: int64(sample.Timestamp),
+			})
+		}
 	}
 
-	if len(s.Samples) == 0 {
+	if len(sampleStream.Histograms) > 0 {
 		s.Histograms = make([]SampleHistogramPair, 0, len(sampleStream.Histograms))
 		for _, h := range sampleStream.Histograms {
 			s.Histograms = append(s.Histograms, fromModelSampleHistogramPair(h))
@@ -471,8 +473,10 @@ func (s *Sample) MarshalJSON() ([]byte, error) {
 	sample.Metric = cortexpb.FromLabelAdaptersToMetric(s.Labels)
 	sample.Value = model.SampleValue(s.SampleValue)
 	sample.Timestamp = model.Time(s.Timestamp)
-	msh := toModelSampleHistogram(*s.Histogram)
-	sample.Histogram = &msh
+	if s.Histogram != nil {
+		msh := toModelSampleHistogram(*s.Histogram)
+		sample.Histogram = &msh
+	}
 	return json.Marshal(sample)
 }
 
