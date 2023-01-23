@@ -1349,8 +1349,8 @@ func (mockCacheGenNumberLoader) GetResultsCacheGenNumber(tenantIDs []string) str
 	return ""
 }
 
-func genSampleHistogram() *SampleHistogram {
-	return &SampleHistogram{
+func genSampleHistogram() SampleHistogram {
+	return SampleHistogram{
 		Count: 5,
 		Sum:   18.4,
 		Buckets: []*HistogramBucket{

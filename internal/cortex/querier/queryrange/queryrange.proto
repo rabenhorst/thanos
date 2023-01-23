@@ -103,8 +103,9 @@ message SampleStream {
 
 message Sample {
   repeated cortexpb.LabelPair labels = 1 [(gogoproto.nullable) = false, (gogoproto.jsontag) = "metric", (gogoproto.customtype) = "github.com/thanos-io/thanos/internal/cortex/cortexpb.LabelAdapter"];
-  cortexpb.Sample sample = 2 [(gogoproto.nullable) = true, (gogoproto.jsontag) = "value"];
-  SampleHistogramPair histogram = 3 [(gogoproto.nullable) = true, (gogoproto.jsontag) = "histogram"];
+  double sampleValue = 2 [(gogoproto.jsontag) = "value"];
+  int64 timestamp = 3;
+  SampleHistogram histogram = 4 [(gogoproto.nullable) = true, (gogoproto.jsontag) = "histogram"];
 }
 
 message StringSample {
@@ -114,7 +115,7 @@ message StringSample {
 
 message SampleHistogramPair {
   int64 timestamp = 1;
-  SampleHistogram histogram = 2;
+  SampleHistogram histogram = 2 [(gogoproto.nullable) = false];
 }
 
 message SampleHistogram {

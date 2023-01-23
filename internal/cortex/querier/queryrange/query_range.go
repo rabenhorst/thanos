@@ -399,63 +399,81 @@ func (prometheusCodec) EncodeResponse(ctx context.Context, res Response) (*http.
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *SampleStream) UnmarshalJSON(data []byte) error {
-	var stream struct {
-		Metric     model.Metric          `json:"metric"`
-		Values     []cortexpb.Sample     `json:"values"`
-		Histograms []SampleHistogramPair `json:"histograms"`
-	}
-	if err := json.Unmarshal(data, &stream); err != nil {
+	var sampleStream model.SampleStream
+
+	if err := json.Unmarshal(data, &sampleStream); err != nil {
 		return err
 	}
-	s.Labels = cortexpb.FromMetricsToLabelAdapters(stream.Metric)
-	s.Samples = stream.Values
-	s.Histograms = stream.Histograms
+	s.Labels = cortexpb.FromMetricsToLabelAdapters(sampleStream.Metric)
+
+	s.Samples = make([]cortexpb.Sample, 0, len(sampleStream.Values))
+	for _, sample := range sampleStream.Values {
+		s.Samples = append(s.Samples, cortexpb.Sample{
+			Value:       float64(sample.Value),
+			TimestampMs: int64(sample.Timestamp),
+		})
+	}
+
+	if len(s.Samples) == 0 {
+		s.Histograms = make([]SampleHistogramPair, 0, len(sampleStream.Histograms))
+		for _, h := range sampleStream.Histograms {
+			s.Histograms = append(s.Histograms, fromModelSampleHistogramPair(h))
+		}
+	}
+
 	return nil
 }
 
 // MarshalJSON implements json.Marshaler.
 func (s *SampleStream) MarshalJSON() ([]byte, error) {
-	stream := struct {
-		Metric     model.Metric          `json:"metric"`
-		Values     []cortexpb.Sample     `json:"values"`
-		Histograms []SampleHistogramPair `json:"histograms"`
-	}{
-		Metric:     cortexpb.FromLabelAdaptersToMetric(s.Labels),
-		Values:     s.Samples,
-		Histograms: s.Histograms,
+	var sampleStream model.SampleStream
+	sampleStream.Metric = cortexpb.FromLabelAdaptersToMetric(s.Labels)
+
+	sampleStream.Values = make([]model.SamplePair, 0, len(s.Samples))
+	for _, sample := range s.Samples {
+		sampleStream.Values = append(sampleStream.Values, model.SamplePair{
+			Value:     model.SampleValue(sample.Value),
+			Timestamp: model.Time(sample.TimestampMs),
+		})
 	}
-	return json.Marshal(stream)
+
+	sampleStream.Histograms = make([]model.SampleHistogramPair, 0, len(s.Histograms))
+	for _, h := range s.Histograms {
+		sampleStream.Histograms = append(sampleStream.Histograms, toModelSampleHistogramPair(h))
+	}
+
+	return json.Marshal(sampleStream)
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *Sample) UnmarshalJSON(data []byte) error {
-	var sample struct {
-		Metric    model.Metric         `json:"metric"`
-		Value     *cortexpb.Sample     `json:"value"`
-		Histogram *SampleHistogramPair `json:"histogram"`
-	}
+	var sample model.Sample
 	if err := json.Unmarshal(data, &sample); err != nil {
 		return err
 	}
 	s.Labels = cortexpb.FromMetricsToLabelAdapters(sample.Metric)
-	s.Sample = sample.Value
-	s.Histogram = sample.Histogram
+	s.SampleValue = float64(sample.Value)
+	s.Timestamp = int64(sample.Timestamp)
+
+	if sample.Histogram != nil {
+		sh := fromModelSampleHistogram(sample.Histogram)
+		s.Histogram = &sh
+	} else {
+		s.Histogram = nil
+	}
+
 	return nil
 }
 
 // MarshalJSON implements json.Marshaler.
 func (s *Sample) MarshalJSON() ([]byte, error) {
-	sample := struct {
-		Metric    model.Metric         `json:"metric"`
-		Value     *cortexpb.Sample     `json:"value,omitempty"`
-		Histogram *SampleHistogramPair `json:"histogram,omitempty"`
-	}{
-		Metric:    cortexpb.FromLabelAdaptersToMetric(s.Labels),
-		Value:     s.Sample,
-		Histogram: s.Histogram,
-	}
-	b, err := json.Marshal(sample)
-	return b, err
+	var sample model.Sample
+	sample.Metric = cortexpb.FromLabelAdaptersToMetric(s.Labels)
+	sample.Value = model.SampleValue(s.SampleValue)
+	sample.Timestamp = model.Time(s.Timestamp)
+	msh := toModelSampleHistogram(*s.Histogram)
+	sample.Histogram = &msh
+	return json.Marshal(sample)
 }
 
 // MarshalJSON implements json.Marshaler.
