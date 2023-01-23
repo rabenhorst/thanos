@@ -6,12 +6,15 @@ package e2e_test
 import (
 	"context"
 	"fmt"
+
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/efficientgo/core/testutil"
 	"github.com/efficientgo/e2e"
+	e2emon "github.com/efficientgo/e2e/monitoring"
+	"github.com/efficientgo/e2e/monitoring/matchers"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/prompb"
@@ -22,6 +25,8 @@ import (
 	"github.com/thanos-io/thanos/pkg/receive"
 	"github.com/thanos-io/thanos/test/e2e/e2ethanos"
 )
+
+const testHistogramMetricName = "fake_histogram"
 
 func TestQueryNativeHistograms(t *testing.T) {
 	e, err := e2e.NewDockerEnvironment("nat-hist-query")
@@ -52,16 +57,16 @@ func TestQueryNativeHistograms(t *testing.T) {
 	ts := func() time.Time { return now }
 
 	// Make sure we can query histogram from both Prometheus instances.
-	queryAndAssert(t, ctx, prom1.Endpoint("http"), func() string { return "fake_histogram" }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[0], nil))
-	queryAndAssert(t, ctx, prom2.Endpoint("http"), func() string { return "fake_histogram" }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[0], nil))
+	queryAndAssert(t, ctx, prom1.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[0], nil))
+	queryAndAssert(t, ctx, prom2.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[0], nil))
 
 	// Query deduplicated histogram from Thanos Querier.
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "fake_histogram" }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[0], map[string]string{
+	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[0], map[string]string{
 		"prometheus": "prom-ha",
 	}))
 
 	// Query histogram using histogram_count function and deduplication from Thanos Querier.
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "histogram_count(fake_histogram)" }, ts, promclient.QueryOptions{Deduplicate: true}, model.Vector{
+	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return fmt.Sprintf("histogram_count(%v)", testHistogramMetricName) }, ts, promclient.QueryOptions{Deduplicate: true}, model.Vector{
 		&model.Sample{
 			Value: 5,
 			Metric: model.Metric{
@@ -72,7 +77,7 @@ func TestQueryNativeHistograms(t *testing.T) {
 	})
 
 	// Query histogram using group function to test pushdown.
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "group(fake_histogram)" }, time.Now, promclient.QueryOptions{Deduplicate: true}, model.Vector{
+	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return fmt.Sprintf("group(%v)", testHistogramMetricName) }, time.Now, promclient.QueryOptions{Deduplicate: true}, model.Vector{
 		&model.Sample{
 			Value:  1,
 			Metric: model.Metric{},
@@ -113,7 +118,7 @@ func TestWriteNativeHistograms(t *testing.T) {
 
 	ts := func() time.Time { return now }
 
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "fake_histogram" }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[0], map[string]string{
+	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[0], map[string]string{
 		"tenant_id": "default-tenant",
 	}))
 }
@@ -138,8 +143,8 @@ func TestQueryFrontendNativeHistograms(t *testing.T) {
 		},
 	}
 
-	qf := e2ethanos.NewQueryFrontend(e, "query-frontend", "http://"+querier.InternalEndpoint("http"), queryfrontend.Config{}, inMemoryCacheConfig)
-	testutil.Ok(t, e2e.StartAndWaitReady(qf))
+	queryFrontend := e2ethanos.NewQueryFrontend(e, "query-frontend", "http://"+querier.InternalEndpoint("http"), queryfrontend.Config{}, inMemoryCacheConfig)
+	testutil.Ok(t, e2e.StartAndWaitReady(queryFrontend))
 
 	rawRemoteWriteURL1 := "http://" + prom1.Endpoint("http") + "/api/v1/write"
 	rawRemoteWriteURL2 := "http://" + prom2.Endpoint("http") + "/api/v1/write"
@@ -154,28 +159,145 @@ func TestQueryFrontendNativeHistograms(t *testing.T) {
 	startTime, err := writeHistograms(ctx, now, histograms, rawRemoteWriteURL2)
 	testutil.Ok(t, err)
 
-	ts := func() time.Time { return now }
-
-	// instant query
-	queryAndAssert(t, ctx, qf.Endpoint("http"), func() string { return "fake_histogram" }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[len(histograms)-1], map[string]string{
-		"prometheus": "prom-ha",
-	}))
-
-	expectedRes := expectedHistogramModelMatrix(histograms, startTime, map[string]string{
-		"prometheus": "prom-ha",
+	// Ensure we can get the result from Querier first so that it
+	// doesn't need to retry when we send queries to the frontend later.
+	queryAndAssertSeries(t, ctx, querier.Endpoint("http"), func() string { return testHistogramMetricName }, time.Now, promclient.QueryOptions{Deduplicate: true}, []model.Metric{
+		{
+			"__name__":   testHistogramMetricName,
+			"prometheus": "prom-ha",
+			"foo":        "bar",
+		},
 	})
 
-	rangeQuery(t, ctx, qf.Endpoint("http"), func() string { return "fake_histogram" }, startTime.UnixMilli(),
-		now.UnixMilli(),
-		30, // Taken from UI.
-		promclient.QueryOptions{
-			Deduplicate: true,
-		}, func(res model.Matrix) error {
-			if !reflect.DeepEqual(res, expectedRes) {
-				return fmt.Errorf("unexpected results (got %v but expected %v)", res, expectedRes)
-			}
-			return nil
+	vals, err := querier.SumMetrics([]string{"http_requests_total"})
+	e2emon.WithLabelMatchers(matchers.MustNewMatcher(matchers.MatchEqual, "handler", "query"))
+
+	testutil.Ok(t, err)
+	testutil.Equals(t, 1, len(vals))
+	queryTimes := vals[0]
+
+	ts := func() time.Time { return now }
+
+	t.Run("query frontend works for instant query", func(t *testing.T) {
+		queryAndAssert(t, ctx, queryFrontend.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[len(histograms)-1], map[string]string{
+			"prometheus": "prom-ha",
+		}))
+
+		testutil.Ok(t, queryFrontend.WaitSumMetricsWithOptions(
+			e2emon.Equals(1),
+			[]string{"thanos_query_frontend_queries_total"},
+			e2emon.WithLabelMatchers(matchers.MustNewMatcher(matchers.MatchEqual, "op", "query")),
+		))
+
+		testutil.Ok(t, querier.WaitSumMetricsWithOptions(
+			e2emon.Equals(queryTimes+1),
+			[]string{"http_requests_total"},
+			e2emon.WithLabelMatchers(matchers.MustNewMatcher(matchers.MatchEqual, "handler", "query")),
+		))
+	})
+
+	t.Run("query range query, all but last histogram", func(t *testing.T) {
+		expectedRes := expectedHistogramModelMatrix(histograms[:len(histograms)-1], startTime, map[string]string{
+			"prometheus": "prom-ha",
 		})
+
+		// query all but last sample
+		rangeQuery(t, ctx, queryFrontend.Endpoint("http"), func() string { return testHistogramMetricName },
+			startTime.UnixMilli(),
+			// Skip last step, so that news samples is not queried and will be queried in next step.
+			now.Add(-30*time.Second).UnixMilli(),
+			30, // Taken from UI.
+			promclient.QueryOptions{
+				Deduplicate: true,
+			}, func(res model.Matrix) error {
+				if !reflect.DeepEqual(res, expectedRes) {
+					return fmt.Errorf("unexpected results (got %v but expected %v)", res, expectedRes)
+				}
+				return nil
+			})
+
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "cortex_cache_fetched_keys_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(0), "cortex_cache_hits_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_added_new_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_added_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_entries"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_gets_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_misses_total"))
+
+		testutil.Ok(t, querier.WaitSumMetricsWithOptions(
+			e2emon.Equals(1),
+			[]string{"http_requests_total"},
+			e2emon.WithLabelMatchers(matchers.MustNewMatcher(matchers.MatchEqual, "handler", "query_range")),
+		))
+
+	})
+
+	t.Run("query range, all histograms", func(t *testing.T) {
+		expectedRes := expectedHistogramModelMatrix(histograms, startTime, map[string]string{
+			"prometheus": "prom-ha",
+		})
+
+		rangeQuery(t, ctx, queryFrontend.Endpoint("http"), func() string { return testHistogramMetricName },
+			startTime.UnixMilli(),
+			now.UnixMilli(),
+			30, // Taken from UI.
+			promclient.QueryOptions{
+				Deduplicate: true,
+			}, func(res model.Matrix) error {
+				if !reflect.DeepEqual(res, expectedRes) {
+					return fmt.Errorf("unexpected results (got %v but expected %v)", res, expectedRes)
+				}
+				return nil
+			})
+
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(2), "cortex_cache_fetched_keys_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "cortex_cache_hits_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_added_new_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(2), "querier_cache_added_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_entries"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(2), "querier_cache_gets_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_misses_total"))
+
+		testutil.Ok(t, querier.WaitSumMetricsWithOptions(
+			e2emon.Equals(2),
+			[]string{"http_requests_total"},
+			e2emon.WithLabelMatchers(matchers.MustNewMatcher(matchers.MatchEqual, "handler", "query_range")),
+		))
+	})
+
+	t.Run("query range, all histograms again", func(t *testing.T) {
+		expectedRes := expectedHistogramModelMatrix(histograms, startTime, map[string]string{
+			"prometheus": "prom-ha",
+		})
+
+		rangeQuery(t, ctx, queryFrontend.Endpoint("http"), func() string { return testHistogramMetricName },
+			startTime.UnixMilli(),
+			now.UnixMilli(),
+			30, // Taken from UI.
+			promclient.QueryOptions{
+				Deduplicate: true,
+			}, func(res model.Matrix) error {
+				if !reflect.DeepEqual(res, expectedRes) {
+					return fmt.Errorf("unexpected results (got %v but expected %v)", res, expectedRes)
+				}
+				return nil
+			})
+
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(3), "cortex_cache_fetched_keys_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(2), "cortex_cache_hits_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_added_new_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(3), "querier_cache_added_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_entries"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(3), "querier_cache_gets_total"))
+		testutil.Ok(t, queryFrontend.WaitSumMetrics(e2emon.Equals(1), "querier_cache_misses_total"))
+
+		testutil.Ok(t, querier.WaitSumMetricsWithOptions(
+			e2emon.Equals(3),
+			[]string{"http_requests_total"},
+			e2emon.WithLabelMatchers(matchers.MustNewMatcher(matchers.MatchEqual, "handler", "query_range")),
+		))
+
+	})
 }
 
 func generateHistograms(n int) []*histogram.Histogram {
@@ -193,7 +315,7 @@ func writeHistograms(ctx context.Context, now time.Time, histograms []*histogram
 
 	timeSeriespb := prompb.TimeSeries{
 		Labels: []prompb.Label{
-			{Name: "__name__", Value: "fake_histogram"},
+			{Name: "__name__", Value: testHistogramMetricName},
 			{Name: "foo", Value: "bar"},
 		},
 		Histograms: prompbHistograms,
@@ -206,7 +328,7 @@ func writeHistograms(ctx context.Context, now time.Time, histograms []*histogram
 
 func expectedHistogramModelVector(histogram *histogram.Histogram, externalLabels map[string]string) model.Vector {
 	metrics := model.Metric{
-		"__name__": "fake_histogram",
+		"__name__": testHistogramMetricName,
 		"foo":      "bar",
 	}
 	for labelKey, labelValue := range externalLabels {
@@ -225,7 +347,7 @@ func expectedHistogramModelVector(histogram *histogram.Histogram, externalLabels
 
 func expectedHistogramModelMatrix(histograms []*histogram.Histogram, startTime time.Time, externalLabels map[string]string) model.Matrix {
 	metrics := model.Metric{
-		"__name__": "fake_histogram",
+		"__name__": testHistogramMetricName,
 		"foo":      "bar",
 	}
 	for labelKey, labelValue := range externalLabels {
