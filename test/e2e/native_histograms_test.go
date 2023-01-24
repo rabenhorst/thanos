@@ -151,7 +151,7 @@ func TestQueryFrontendNativeHistograms(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	t.Cleanup(cancel)
 
-	histograms := tsdb.GenerateTestHistograms(1)
+	histograms := tsdb.GenerateTestHistograms(4)
 	now := time.Now()
 	_, err = writeHistograms(ctx, now, histograms, rawRemoteWriteURL1)
 	testutil.Ok(t, err)
