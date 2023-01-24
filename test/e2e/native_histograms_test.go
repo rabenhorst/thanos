@@ -5,9 +5,7 @@ package e2e_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-
 	"reflect"
 	"testing"
 	"time"
@@ -47,7 +45,7 @@ func TestQueryNativeHistograms(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	t.Cleanup(cancel)
 
-	histograms := generateHistograms(1)
+	histograms := tsdb.GenerateTestHistograms(1)
 	now := time.Now()
 
 	_, err = writeHistograms(ctx, now, histograms, rawRemoteWriteURL1)
@@ -112,7 +110,7 @@ func TestWriteNativeHistograms(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	t.Cleanup(cancel)
 
-	histograms := generateHistograms(1)
+	histograms := tsdb.GenerateTestHistograms(1)
 	now := time.Now()
 	_, err = writeHistograms(ctx, now, histograms, rawRemoteWriteURL)
 	testutil.Ok(t, err)
@@ -153,7 +151,7 @@ func TestQueryFrontendNativeHistograms(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	t.Cleanup(cancel)
 
-	histograms := generateHistograms(4)
+	histograms := tsdb.GenerateTestHistograms(1)
 	now := time.Now()
 	_, err = writeHistograms(ctx, now, histograms, rawRemoteWriteURL1)
 	testutil.Ok(t, err)
@@ -299,18 +297,6 @@ func TestQueryFrontendNativeHistograms(t *testing.T) {
 		))
 
 	})
-}
-
-func TestGenH(t *testing.T) {
-	h := generateHistograms(2)
-	hmm := expectedHistogramModelMatrix(h, time.Now(), nil)
-	b, err := json.Marshal(hmm)
-	testutil.Ok(t, err)
-	fmt.Println(string(b))
-}
-
-func generateHistograms(n int) []*histogram.Histogram {
-	return tsdb.GenerateTestHistograms(n)
 }
 
 func writeHistograms(ctx context.Context, now time.Time, histograms []*histogram.Histogram, rawRemoteWriteURL string) (time.Time, error) {

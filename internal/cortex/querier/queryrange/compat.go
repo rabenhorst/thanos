@@ -7,6 +7,10 @@ import (
 	"github.com/prometheus/common/model"
 )
 
+// The following code will allow us to use JSON marshal and unmarshal functions from the Prometheus common package in
+// query_range.go: https://github.com/prometheus/common/blob/846591a166358c7048ef197e84501ca688dda920/model/value.go
+// Please see the link above for more details on Sample, SampleStream, HistogramPair and SampleHistogramPair.
+
 func toModelSampleHistogramPair(s SampleHistogramPair) model.SampleHistogramPair {
 	return model.SampleHistogramPair{
 		Timestamp: model.Time(s.Timestamp),

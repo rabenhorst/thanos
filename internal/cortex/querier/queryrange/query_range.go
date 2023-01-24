@@ -397,7 +397,8 @@ func (prometheusCodec) EncodeResponse(ctx context.Context, res Response) (*http.
 	return &resp, nil
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
+// UnmarshalJSON implements json.Unmarshaler and is used for unmarshalling
+// a Prometheus range query response (matrix).
 func (s *SampleStream) UnmarshalJSON(data []byte) error {
 	var sampleStream model.SampleStream
 	if err := json.Unmarshal(data, &sampleStream); err != nil {
@@ -447,7 +448,8 @@ func (s *SampleStream) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sampleStream)
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
+// UnmarshalJSON implements json.Unmarshaler and is used for unmarshalling
+// a Prometheus instant query response (vector).
 func (s *Sample) UnmarshalJSON(data []byte) error {
 	var sample model.Sample
 	if err := json.Unmarshal(data, &sample); err != nil {
