@@ -5,6 +5,7 @@ package e2e_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"reflect"
@@ -298,6 +299,14 @@ func TestQueryFrontendNativeHistograms(t *testing.T) {
 		))
 
 	})
+}
+
+func TestGenH(t *testing.T) {
+	h := generateHistograms(2)
+	hmm := expectedHistogramModelMatrix(h, time.Now(), nil)
+	b, err := json.Marshal(hmm)
+	testutil.Ok(t, err)
+	fmt.Println(string(b))
 }
 
 func generateHistograms(n int) []*histogram.Histogram {
