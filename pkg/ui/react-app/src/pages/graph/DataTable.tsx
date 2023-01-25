@@ -30,13 +30,13 @@ export interface QueryResult {
 
 interface InstantSample {
   metric: Metric;
-  value: SampleValue;
+  value?: SampleValue;
   histogram?: SampleHistogram;
 }
 
 interface RangeSamples {
   metric: Metric;
-  values: SampleValue[];
+  values?: SampleValue[];
   histograms?: SampleHistogram[];
 }
 
