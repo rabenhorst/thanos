@@ -126,7 +126,6 @@ describe('DataTable', () => {
           },
         ],
       },
-      useLocalTime: false,
     };
     const dataTable = shallow(<DataTable {...dataTableProps} />);
 
