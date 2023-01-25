@@ -45,7 +45,7 @@ func TestQueryNativeHistograms(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	t.Cleanup(cancel)
 
-	histograms := tsdb.GenerateTestHistograms(1)
+	histograms := tsdb.GenerateTestHistograms(4)
 	now := time.Now()
 
 	_, err = writeHistograms(ctx, now, histograms, rawRemoteWriteURL1)
@@ -56,31 +56,42 @@ func TestQueryNativeHistograms(t *testing.T) {
 	ts := func() time.Time { return now }
 
 	// Make sure we can query histogram from both Prometheus instances.
-	queryAndAssert(t, ctx, prom1.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[0], nil))
-	queryAndAssert(t, ctx, prom2.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[0], nil))
+	queryAndAssert(t, ctx, prom1.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[len(histograms)-1], nil))
+	queryAndAssert(t, ctx, prom2.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[len(histograms)-1], nil))
 
-	// Query deduplicated histogram from Thanos Querier.
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[0], map[string]string{
-		"prometheus": "prom-ha",
-	}))
-
-	// Query histogram using histogram_count function and deduplication from Thanos Querier.
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return fmt.Sprintf("histogram_count(%v)", testHistogramMetricName) }, ts, promclient.QueryOptions{Deduplicate: true}, model.Vector{
-		&model.Sample{
-			Value: 5,
-			Metric: model.Metric{
-				"foo":        "bar",
-				"prometheus": "prom-ha",
-			},
-		},
+	t.Run("query deduplicated histogram", func(t *testing.T) {
+		queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[len(histograms)-1], map[string]string{
+			"prometheus": "prom-ha",
+		}))
 	})
 
-	// Query histogram using group function to test pushdown.
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return fmt.Sprintf("group(%v)", testHistogramMetricName) }, time.Now, promclient.QueryOptions{Deduplicate: true}, model.Vector{
-		&model.Sample{
-			Value:  1,
-			Metric: model.Metric{},
-		},
+	t.Run("query histogram using histogram_count fn and deduplication", func(t *testing.T) {
+		queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return fmt.Sprintf("histogram_count(%v)", testHistogramMetricName) }, ts, promclient.QueryOptions{Deduplicate: true}, model.Vector{
+			&model.Sample{
+				Value: 17,
+				Metric: model.Metric{
+					"foo":        "bar",
+					"prometheus": "prom-ha",
+				},
+			},
+		})
+	})
+
+	t.Run("query histogram using group function for testing pushdown", func(t *testing.T) {
+		queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return fmt.Sprintf("group(%v)", testHistogramMetricName) }, ts, promclient.QueryOptions{Deduplicate: true}, model.Vector{
+			&model.Sample{
+				Value:  1,
+				Metric: model.Metric{},
+			},
+		})
+	})
+
+	t.Run("query histogram rate and compare to Prometheus result", func(t *testing.T) {
+		query := func() string { return fmt.Sprintf("rate(%v[1m])", testHistogramMetricName) }
+		expected := instantQuery(t, ctx, prom1.Endpoint("http"), query, ts, promclient.QueryOptions{}, 1)
+		expected[0].Metric["prometheus"] = "prom-ha"
+		expected[0].Timestamp = 0
+		queryAndAssert(t, ctx, querier.Endpoint("http"), query, ts, promclient.QueryOptions{Deduplicate: true}, expected)
 	})
 }
 
