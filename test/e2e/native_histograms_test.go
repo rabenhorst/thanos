@@ -5,6 +5,8 @@ package e2e_test
 
 import (
 	"context"
+	"fmt"
+	"github.com/prometheus/prometheus/tsdb"
 	"testing"
 	"time"
 
@@ -18,6 +20,8 @@ import (
 	"github.com/thanos-io/thanos/pkg/receive"
 	"github.com/thanos-io/thanos/test/e2e/e2ethanos"
 )
+
+const testHistogramMetricName = "fake_histogram"
 
 func TestQueryNativeHistograms(t *testing.T) {
 	e, err := e2e.NewDockerEnvironment("nat-hist-query")
@@ -37,22 +41,29 @@ func TestQueryNativeHistograms(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	t.Cleanup(cancel)
 
-	testutil.Ok(t, synthesizeHistogram(ctx, rawRemoteWriteURL1))
-	testutil.Ok(t, synthesizeHistogram(ctx, rawRemoteWriteURL2))
+	histograms := tsdb.GenerateTestHistograms(4)
+	now := time.Now()
+
+	_, err = writeHistograms(ctx, now, histograms, rawRemoteWriteURL1)
+	testutil.Ok(t, err)
+	_, err = writeHistograms(ctx, now, histograms, rawRemoteWriteURL2)
+	testutil.Ok(t, err)
+
+	ts := func() time.Time { return now }
 
 	// Make sure we can query histogram from both Prometheus instances.
-	queryAndAssert(t, ctx, prom1.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{}, expectedHistogramModelVector(nil))
-	queryAndAssert(t, ctx, prom2.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{}, expectedHistogramModelVector(nil))
+	queryAndAssert(t, ctx, prom1.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[len(histograms)-1], nil))
+	queryAndAssert(t, ctx, prom2.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{}, expectedHistogramModelVector(histograms[len(histograms)-1], nil))
 
 	// Query deduplicated histogram from Thanos Querier.
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(map[string]string{
+	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[len(histograms)-1], map[string]string{
 		"prometheus": "prom-ha",
 	}))
 
 	// Query histogram using histogram_count function and deduplication from Thanos Querier.
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "histogram_count(fake_histogram)" }, time.Now, promclient.QueryOptions{Deduplicate: true}, model.Vector{
+	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return fmt.Sprintf("histogram_count(%v)", testHistogramMetricName) }, ts, promclient.QueryOptions{Deduplicate: true}, model.Vector{
 		&model.Sample{
-			Value: 5,
+			Value: 17,
 			Metric: model.Metric{
 				"foo":        "bar",
 				"prometheus": "prom-ha",
@@ -61,12 +72,19 @@ func TestQueryNativeHistograms(t *testing.T) {
 	})
 
 	// Query histogram using group function to test pushdown.
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "group(fake_histogram)" }, time.Now, promclient.QueryOptions{Deduplicate: true}, model.Vector{
+	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return fmt.Sprintf("group(%v)", testHistogramMetricName) }, ts, promclient.QueryOptions{Deduplicate: true}, model.Vector{
 		&model.Sample{
 			Value:  1,
 			Metric: model.Metric{},
 		},
 	})
+
+	// Compare histogram rate function result with Prometheus.
+	query := func() string { return fmt.Sprintf("rate(%v[1m])", testHistogramMetricName) }
+	expected := instantQuery(t, ctx, prom1.Endpoint("http"), query, ts, promclient.QueryOptions{}, 1)
+	expected[0].Metric["prometheus"] = "prom-ha"
+	expected[0].Timestamp = 0
+	queryAndAssert(t, ctx, querier.Endpoint("http"), query, ts, promclient.QueryOptions{Deduplicate: true}, expected)
 }
 
 func TestWriteNativeHistograms(t *testing.T) {
@@ -95,33 +113,43 @@ func TestWriteNativeHistograms(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	t.Cleanup(cancel)
 
-	err = synthesizeHistogram(ctx, rawRemoteWriteURL)
+	histograms := tsdb.GenerateTestHistograms(1)
+	now := time.Now()
+	_, err = writeHistograms(ctx, now, histograms, rawRemoteWriteURL)
 	testutil.Ok(t, err)
 
-	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return "fake_histogram" }, time.Now, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(map[string]string{
+	ts := func() time.Time { return now }
+
+	queryAndAssert(t, ctx, querier.Endpoint("http"), func() string { return testHistogramMetricName }, ts, promclient.QueryOptions{Deduplicate: true}, expectedHistogramModelVector(histograms[0], map[string]string{
 		"tenant_id": "default-tenant",
 	}))
 }
 
-func synthesizeHistogram(ctx context.Context, rawRemoteWriteURL string) error {
-	timeSeriespb := prompb.TimeSeries{
-		Labels: []prompb.Label{
-			{Name: "__name__", Value: "fake_histogram"},
-			{Name: "foo", Value: "bar"},
-		},
-		Histograms: []prompb.Histogram{
-			remote.HistogramToHistogramProto(time.Now().UnixMilli(), testHistogram()),
-		},
+func writeHistograms(ctx context.Context, now time.Time, histograms []*histogram.Histogram, rawRemoteWriteURL string) (time.Time, error) {
+	startTime := now.Add(time.Duration(len(histograms)-1) * -30 * time.Second).Truncate(30 * time.Second)
+	prompbHistograms := make([]prompb.Histogram, 0, len(histograms))
+
+	for i, h := range histograms {
+		ts := startTime.Add(time.Duration(i) * 30 * time.Second).UnixMilli()
+		prompbHistograms = append(prompbHistograms, remote.HistogramToHistogramProto(ts, h))
 	}
 
-	return storeWriteRequest(ctx, rawRemoteWriteURL, &prompb.WriteRequest{
+	timeSeriespb := prompb.TimeSeries{
+		Labels: []prompb.Label{
+			{Name: "__name__", Value: testHistogramMetricName},
+			{Name: "foo", Value: "bar"},
+		},
+		Histograms: prompbHistograms,
+	}
+
+	return startTime, storeWriteRequest(ctx, rawRemoteWriteURL, &prompb.WriteRequest{
 		Timeseries: []prompb.TimeSeries{timeSeriespb},
 	})
 }
 
-func expectedHistogramModelVector(externalLabels map[string]string) model.Vector {
+func expectedHistogramModelVector(histogram *histogram.Histogram, externalLabels map[string]string) model.Vector {
 	metrics := model.Metric{
-		"__name__": "fake_histogram",
+		"__name__": testHistogramMetricName,
 		"foo":      "bar",
 	}
 	for labelKey, labelValue := range externalLabels {
@@ -131,7 +159,7 @@ func expectedHistogramModelVector(externalLabels map[string]string) model.Vector
 	return model.Vector{
 		&model.Sample{
 			Metric:    metrics,
-			Histogram: histogramToSampleHistogram(testHistogram()),
+			Histogram: histogramToSampleHistogram(histogram),
 		},
 	}
 }
@@ -172,20 +200,5 @@ func boundaries(bucket histogram.Bucket[uint64]) int {
 		return 2
 	default:
 		return 3
-	}
-}
-
-func testHistogram() *histogram.Histogram {
-	return &histogram.Histogram{
-		Count:         5,
-		ZeroCount:     2,
-		ZeroThreshold: 0.001,
-		Sum:           18.4,
-		Schema:        1,
-		PositiveSpans: []histogram.Span{
-			{Offset: 0, Length: 2},
-			{Offset: 1, Length: 2},
-		},
-		PositiveBuckets: []int64{1, 1, -1, 0},
 	}
 }
