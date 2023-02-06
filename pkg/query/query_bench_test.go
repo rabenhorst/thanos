@@ -129,7 +129,7 @@ func testSelect(t testutil.TB, q *querier, expectedSeries []labels.Labels) {
 					gotSeriesCount++
 
 					// This is when resource usage should actually start growing.
-					iter := s.Iterator()
+					iter := s.Iterator(nil)
 					for iter.Next() != chunkenc.ValNone {
 						testT, testV = iter.At()
 					}
@@ -145,7 +145,7 @@ func testSelect(t testutil.TB, q *querier, expectedSeries []labels.Labels) {
 					gotSeries = append(gotSeries, s.Labels())
 
 					// This is when resource usage should actually start growing.
-					iter := s.Iterator()
+					iter := s.Iterator(nil)
 					for iter.Next() != chunkenc.ValNone {
 						testT, testV = iter.At()
 					}
