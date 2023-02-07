@@ -23,10 +23,10 @@ func NewChunkSeriesMerger() storage.VerticalChunkSeriesMergeFunc {
 		}
 		return &storage.ChunkSeriesEntry{
 			Lset: series[0].Labels(),
-			ChunkIteratorFn: func(iterator chunks.Iterator) chunks.Iterator {
+			ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
 				iterators := make([]chunks.Iterator, 0, len(series))
 				for _, s := range series {
-					iterators = append(iterators, s.Iterator(iterator))
+					iterators = append(iterators, s.Iterator(nil))
 				}
 				return &dedupChunksIterator{
 					iterators: iterators,

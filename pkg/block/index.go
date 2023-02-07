@@ -221,9 +221,9 @@ func GatherIndexHealthStats(logger log.Logger, fn string, minTime, maxTime int64
 		return stats, errors.Wrap(err, "get all postings")
 	}
 	var (
-		lastBuilder labels.ScratchBuilder
-		builder     labels.ScratchBuilder
-		chks        []chunks.Meta
+		lastLset labels.Labels
+		builder  labels.ScratchBuilder
+		chks     []chunks.Meta
 
 		seriesLifeDuration                          = newMinMaxSumInt64()
 		seriesLifeDurationWithoutSingleSampleSeries = newMinMaxSumInt64()
@@ -246,7 +246,7 @@ func GatherIndexHealthStats(logger log.Logger, fn string, minTime, maxTime int64
 
 	// Per series.
 	for p.Next() {
-		lastBuilder.Assign(builder.Labels())
+		lastLset = append(lastLset[:0], builder.Labels()...)
 
 		id := p.At()
 		stats.TotalSeries++
@@ -257,8 +257,8 @@ func GatherIndexHealthStats(logger log.Logger, fn string, minTime, maxTime int64
 		if len(builder.Labels()) == 0 {
 			return stats, errors.Errorf("empty label set detected for series %d", id)
 		}
-		if labels.Compare(lastBuilder.Labels(), builder.Labels()) >= 0 {
-			return stats, errors.Errorf("series %v out of order; previous %v", builder.Labels(), lastBuilder.Labels())
+		if labels.Compare(lastLset, builder.Labels()) >= 0 {
+			return stats, errors.Errorf("series %v out of order; previous %v", builder.Labels(), lastLset)
 		}
 		l0 := builder.Labels()[0]
 		for _, l := range builder.Labels()[1:] {
