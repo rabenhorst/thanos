@@ -569,6 +569,85 @@ func TestDownsampleAggrAndNonEmptyXORChunks(t *testing.T) {
 	testutil.NotOk(t, err)
 }
 
+func TestDownSampleNativeHistogram(t *testing.T) {
+	logger := log.NewLogfmtLogger(os.Stderr)
+	dir := t.TempDir()
+	ser := &series{lset: labels.FromStrings("__name__", "a")}
+	raw := chunkenc.NewHistogramChunk()
+	app, err := raw.Appender()
+	testutil.Ok(t, err)
+
+	histograms := tsdb.GenerateTestHistograms(10)
+
+	for i, h := range histograms {
+		app.AppendHistogram(int64(i+1)*300, h)
+	}
+
+	ser.chunks = append(ser.chunks, chunks.Meta{
+		MinTime: math.MaxInt64,
+		MaxTime: math.MinInt64,
+		Chunk:   raw,
+	})
+
+	mb := newMemBlock()
+	mb.addSeries(ser)
+
+	fakeMeta := &metadata.Meta{}
+	id, err := Downsample(logger, fakeMeta, mb, dir, 600)
+	testutil.Ok(t, err)
+
+	_, err = metadata.ReadFromDir(filepath.Join(dir, id.String()))
+	testutil.Ok(t, err)
+
+	indexr, err := index.NewFileReader(filepath.Join(dir, id.String(), block.IndexFilename))
+	testutil.Ok(t, err)
+	defer func() { testutil.Ok(t, indexr.Close()) }()
+
+	chunkr, err := chunks.NewDirReader(filepath.Join(dir, id.String(), block.ChunksDirname), NewPool())
+	testutil.Ok(t, err)
+	defer func() { testutil.Ok(t, chunkr.Close()) }()
+
+	pall, err := indexr.Postings(index.AllPostingsKey())
+	testutil.Ok(t, err)
+
+	var series []storage.SeriesRef
+	for pall.Next() {
+		series = append(series, pall.At())
+	}
+	testutil.Ok(t, pall.Err())
+	testutil.Equals(t, 1, len(series))
+
+	var builder labels.ScratchBuilder
+	var lset labels.Labels
+	var chks []chunks.Meta
+	testutil.Ok(t, indexr.Series(series[0], &builder, &chks))
+
+	lset = builder.Labels()
+	testutil.Equals(t, labels.FromStrings("__name__", "a"), lset)
+
+	var got []*histogram.Histogram
+	for _, c := range chks {
+		chk, err := chunkr.Chunk(c)
+		testutil.Ok(t, err)
+
+		c, ok := chk.(*chunkenc.HistogramChunk)
+		testutil.Assert(t, ok)
+
+		got = append(got, expandHistograms(*c)...)
+	}
+	testutil.Equals(t, histograms, got)
+}
+
+func expandHistograms(c chunkenc.HistogramChunk) []*histogram.Histogram {
+	var histograms []*histogram.Histogram
+	it := c.Iterator(nil)
+	for it.Next() != chunkenc.ValNone {
+		_, h := it.AtHistogram()
+		histograms = append(histograms, h)
+	}
+	return histograms
+}
+
 func chunksToSeriesIteratable(t *testing.T, inRaw [][]sample, inAggr []map[AggrType][]sample) *series {
 	if len(inRaw) > 0 && len(inAggr) > 0 {
 		t.Fatalf("test must not have raw and aggregate input data at once")

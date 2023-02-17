@@ -110,14 +110,16 @@ func Downsample(
 	}
 
 	var (
-		aggrChunks []*AggrChunk
-		all        []sample
-		chks       []chunks.Meta
-		builder    labels.ScratchBuilder
-		reuseIt    chunkenc.Iterator
+		aggrChunks    []*AggrChunk
+		all           []sample
+		chks          []chunks.Meta
+		histogramChks []chunks.Meta
+		builder       labels.ScratchBuilder
+		reuseIt       chunkenc.Iterator
 	)
 	for postings.Next() {
 		chks = chks[:0]
+		histogramChks = histogramChks[:0]
 		all = all[:0]
 		aggrChunks = aggrChunks[:0]
 
@@ -147,6 +149,11 @@ func Downsample(
 		// Raw and already downsampled data need different processing.
 		if origMeta.Thanos.Downsample.Resolution == 0 {
 			for _, c := range chks {
+				if isHistogram(c) {
+					histogramChks = append(histogramChks, c)
+					continue
+				}
+
 				// TODO(bwplotka): We can optimze this further by using in WriteSeries iterators of each chunk instead of
 				// samples. Also ensure 120 sample limit, otherwise we have gigantic chunks.
 				// https://github.com/thanos-io/thanos/issues/2542.
@@ -160,6 +167,10 @@ func Downsample(
 		} else {
 			// Downsample a block that contains aggregated chunks already.
 			for _, c := range chks {
+				if isHistogram(c) {
+					histogramChks = append(histogramChks, c)
+					continue
+				}
 				ac, ok := c.Chunk.(*AggrChunk)
 				if !ok {
 					if c.Chunk.NumSamples() == 0 {
@@ -187,6 +198,9 @@ func Downsample(
 				return id, errors.Wrapf(err, "write series: %d", postings.At())
 			}
 		}
+		if err := streamedBlockWriter.WriteSeries(lset, histogramChks); err != nil {
+			return id, errors.Wrapf(err, "write series: %d", postings.At())
+		}
 	}
 	if postings.Err() != nil {
 		return id, errors.Wrap(postings.Err(), "iterate series set")
@@ -194,6 +208,10 @@ func Downsample(
 
 	id = uid
 	return
+}
+
+func isHistogram(c chunks.Meta) bool {
+	return c.Chunk.Encoding() == chunkenc.EncHistogram || c.Chunk.Encoding() == chunkenc.EncFloatHistogram
 }
 
 // currentWindow returns the end timestamp of the window that t falls into.
