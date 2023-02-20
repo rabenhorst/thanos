@@ -8,8 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/prometheus/prometheus/model/histogram"
-	"go.uber.org/atomic"
 	"math"
 	"math/rand"
 	"net/http"
@@ -364,22 +362,7 @@ func CreateBlock(
 	resolution int64,
 	hashFunc metadata.HashFunc,
 ) (id ulid.ULID, err error) {
-	return createBlock(ctx, dir, series, numSamples, mint, maxt, extLset, resolution, false, hashFunc, chunkenc.ValFloat)
-}
-
-// CreateHistogramBlock writes a block with the given native histogram series and numSamples samples each.
-// Samples will be in the time range [mint, maxt).
-func CreateHistogramBlock(
-	ctx context.Context,
-	dir string,
-	series []labels.Labels,
-	numSamples int,
-	mint, maxt int64,
-	extLset labels.Labels,
-	resolution int64,
-	hashFunc metadata.HashFunc,
-) (id ulid.ULID, err error) {
-	return createBlock(ctx, dir, series, numSamples, mint, maxt, extLset, resolution, false, hashFunc, chunkenc.ValHistogram)
+	return createBlock(ctx, dir, series, numSamples, mint, maxt, extLset, resolution, false, hashFunc)
 }
 
 // CreateBlockWithTombstone is same as CreateBlock but leaves tombstones which mimics the Prometheus local block.
@@ -393,7 +376,7 @@ func CreateBlockWithTombstone(
 	resolution int64,
 	hashFunc metadata.HashFunc,
 ) (id ulid.ULID, err error) {
-	return createBlock(ctx, dir, series, numSamples, mint, maxt, extLset, resolution, true, hashFunc, chunkenc.ValFloat)
+	return createBlock(ctx, dir, series, numSamples, mint, maxt, extLset, resolution, true, hashFunc)
 }
 
 // CreateBlockWithBlockDelay writes a block with the given series and numSamples samples each.
@@ -410,7 +393,7 @@ func CreateBlockWithBlockDelay(
 	resolution int64,
 	hashFunc metadata.HashFunc,
 ) (ulid.ULID, error) {
-	blockID, err := createBlock(ctx, dir, series, numSamples, mint, maxt, extLset, resolution, false, hashFunc, chunkenc.ValFloat)
+	blockID, err := createBlock(ctx, dir, series, numSamples, mint, maxt, extLset, resolution, false, hashFunc)
 	if err != nil {
 		return ulid.ULID{}, errors.Wrap(err, "block creation")
 	}
@@ -445,12 +428,10 @@ func createBlock(
 	resolution int64,
 	tombstones bool,
 	hashFunc metadata.HashFunc,
-	sampleType chunkenc.ValueType,
 ) (id ulid.ULID, err error) {
 	headOpts := tsdb.DefaultHeadOptions()
 	headOpts.ChunkDirRoot = filepath.Join(dir, "chunks")
 	headOpts.ChunkRange = 10000000000
-	headOpts.EnableNativeHistograms = *atomic.NewBool(true)
 	h, err := tsdb.NewHead(nil, nil, nil, nil, headOpts, nil)
 	if err != nil {
 		return id, errors.Wrap(err, "create head block")
@@ -477,21 +458,11 @@ func createBlock(
 		g.Go(func() error {
 			t := mint
 
-			var histograms []*histogram.Histogram
-			if sampleType == chunkenc.ValHistogram {
-				histograms = tsdb.GenerateTestHistograms(numSamples)
-			}
-
 			for i := 0; i < numSamples; i++ {
 				app := h.Appender(ctx)
 
 				for _, lset := range batch {
-					var err error
-					if sampleType == chunkenc.ValFloat {
-						_, err = app.Append(0, lset, t, rand.Float64())
-					} else if sampleType == chunkenc.ValHistogram {
-						_, err = app.AppendHistogram(0, lset, t, histograms[i], nil)
-					}
+					_, err := app.Append(0, lset, t, rand.Float64())
 					if err != nil {
 						if rerr := app.Rollback(); rerr != nil {
 							err = errors.Wrapf(err, "rollback failed: %v", rerr)
