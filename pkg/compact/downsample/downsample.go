@@ -337,6 +337,12 @@ func (a *histogramAggregator) add(s sample) {
 	a.total++
 }
 
+type sampleAggregator[T aggregator | histogramAggregator] interface {
+	reset()
+	add(sample)
+	*T
+}
+
 func detectReset(ph, ch *histogram.FloatHistogram) bool {
 	switch ph.CounterResetHint {
 	case histogram.NotCounterReset:
@@ -479,9 +485,9 @@ func downsampleRawLoop(data []sample, resolution int64, numChunks int, isHistogr
 
 		var lastT int64
 		if isHistogramSamples {
-			lastT = downsampleBatch(batch, resolution, isHistogramSamples, ab.addHistogram)
+			lastT = downsampleBatch[histogramAggregator, *histogramAggregator](batch, resolution, ab.addHistogram)
 		} else {
-			lastT = downsampleBatch(batch, resolution, isHistogramSamples, ab.add)
+			lastT = downsampleBatch[aggregator, *aggregator](batch, resolution, ab.add)
 		}
 
 		// Encode last raw value; see ApplyCounterResetsSeriesIterator.
@@ -497,12 +503,15 @@ func downsampleRawLoop(data []sample, resolution int64, numChunks int, isHistogr
 
 // downsampleBatch aggregates the data over the given resolution and calls add each time
 // the end of a resolution was reached.
-func downsampleBatch(data []sample, resolution int64, add func(int64, *aggregator)) int64 {
+// WTF: https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md#pointer-method-example
+// (╯°□°)╯︵ ┻━┻
+func downsampleBatch[T aggregator | histogramAggregator, PT sampleAggregator[T]](data []sample, resolution int64, add func(int64, PT)) int64 {
 	var (
-		aggr  aggregator
-		nextT = int64(-1)
-		lastT = data[len(data)-1].t
+		aggr  PT = new(T)
+		nextT    = int64(-1)
+		lastT    = data[len(data)-1].t
 	)
+
 	// Fill up one aggregate chunk with up to m samples.
 	for _, s := range data {
 		if value.IsStaleNaN(s.v) {
@@ -510,7 +519,7 @@ func downsampleBatch(data []sample, resolution int64, add func(int64, *aggregato
 		}
 		if s.t > nextT {
 			if nextT != -1 {
-				add(nextT, &aggr)
+				add(nextT, aggr)
 			}
 			aggr.reset()
 			nextT = currentWindow(s.t, resolution)
@@ -525,7 +534,7 @@ func downsampleBatch(data []sample, resolution int64, add func(int64, *aggregato
 		aggr.add(s)
 	}
 	// Add the last sample.
-	add(nextT, &aggr)
+	add(nextT, aggr)
 
 	return nextT
 }
