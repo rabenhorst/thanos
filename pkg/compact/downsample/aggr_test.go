@@ -12,13 +12,13 @@ import (
 )
 
 func TestAggrChunk(t *testing.T) {
-	var input [5][]sample
+	var input [5][]sample[float64]
 
-	input[AggrCount] = []sample{{t: 100, v: 30}, {t: 200, v: 50}, {t: 300, v: 60}, {t: 400, v: 67}}
-	input[AggrSum] = []sample{{t: 100, v: 130}, {t: 200, v: 1000}, {t: 300, v: 2000}, {t: 400, v: 5555}}
-	input[AggrMin] = []sample{{t: 100}, {t: 200, v: -10}, {t: 300, v: 1000}, {t: 400, v: -9.5}}
+	input[AggrCount] = []sample[float64]{{t: 100, v: 30}, {t: 200, v: 50}, {t: 300, v: 60}, {t: 400, v: 67}}
+	input[AggrSum] = []sample[float64]{{t: 100, v: 130}, {t: 200, v: 1000}, {t: 300, v: 2000}, {t: 400, v: 5555}}
+	input[AggrMin] = []sample[float64]{{t: 100}, {t: 200, v: -10}, {t: 300, v: 1000}, {t: 400, v: -9.5}}
 	// Maximum is absent.
-	input[AggrCounter] = []sample{{t: 100, v: 5}, {t: 200, v: 10}, {t: 300, v: 10.1}, {t: 400, v: 15}, {t: 400, v: 3}}
+	input[AggrCounter] = []sample[float64]{{t: 100, v: 5}, {t: 200, v: 10}, {t: 300, v: 10.1}, {t: 400, v: 15}, {t: 400, v: 3}}
 
 	var chks [5]chunkenc.Chunk
 
@@ -35,7 +35,7 @@ func TestAggrChunk(t *testing.T) {
 		}
 	}
 
-	var res [5][]sample
+	var res [5][]sample[float64]
 	ac := EncodeAggrChunk(chks)
 
 	for _, at := range []AggrType{AggrCount, AggrSum, AggrMin, AggrMax, AggrCounter} {

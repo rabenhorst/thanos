@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/model/value"
+	prometheus_value "github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -44,7 +44,7 @@ func TestDownsampleCounterBoundaryReset(t *testing.T) {
 		return
 	}
 
-	counterSamples := func(t *testing.T, achks []*AggrChunk) (res []sample) {
+	counterSamples := func(t *testing.T, achks []*AggrChunk) (res []sample[float64]) {
 		for _, achk := range achks {
 			chk, err := achk.Get(AggrCounter)
 			testutil.Ok(t, err)
@@ -52,13 +52,13 @@ func TestDownsampleCounterBoundaryReset(t *testing.T) {
 			iter := chk.Iterator(nil)
 			for iter.Next() != chunkenc.ValNone {
 				t, v := iter.At()
-				res = append(res, sample{t: t, v: v})
+				res = append(res, sample[float64]{t: t, v: v})
 			}
 		}
 		return
 	}
 
-	counterIterate := func(t *testing.T, achks []*AggrChunk) (res []sample) {
+	counterIterate := func(t *testing.T, achks []*AggrChunk) (res []sample[float64]) {
 		var iters []chunkenc.Iterator
 		for _, achk := range achks {
 			chk, err := achk.Get(AggrCounter)
@@ -69,21 +69,21 @@ func TestDownsampleCounterBoundaryReset(t *testing.T) {
 		citer := NewApplyCounterResetsIterator(iters...)
 		for citer.Next() != chunkenc.ValNone {
 			t, v := citer.At()
-			res = append(res, sample{t: t, v: v})
+			res = append(res, sample[float64]{t: t, v: v})
 		}
 		return
 	}
 
 	type test struct {
-		raw                   []sample
+		raw                   []sample[float64]
 		rawAggrResolution     int64
 		expectedRawAggrChunks int
-		rawCounterSamples     []sample
-		rawCounterIterate     []sample
+		rawCounterSamples     []sample[float64]
+		rawCounterIterate     []sample[float64]
 		aggrAggrResolution    int64
 		aggrChunks            int
-		aggrCounterSamples    []sample
-		aggrCounterIterate    []sample
+		aggrCounterSamples    []sample[float64]
+		aggrCounterIterate    []sample[float64]
 	}
 
 	tests := []test{
@@ -95,7 +95,7 @@ func TestDownsampleCounterBoundaryReset(t *testing.T) {
 			// will only be accounted for if the first raw value
 			// of a chunk is maintained during aggregation.
 			// See #1568 for more details.
-			raw: []sample{
+			raw: []sample[float64]{
 				{t: 10, v: 1}, {t: 20, v: 3}, {t: 30, v: 5},
 				{t: 50, v: 1}, {t: 60, v: 8}, {t: 70, v: 10},
 				{t: 120, v: 1}, {t: 130, v: 18}, {t: 140, v: 20},
@@ -103,13 +103,13 @@ func TestDownsampleCounterBoundaryReset(t *testing.T) {
 			},
 			rawAggrResolution:     50,
 			expectedRawAggrChunks: 4,
-			rawCounterSamples: []sample{
+			rawCounterSamples: []sample[float64]{
 				{t: 10, v: 1}, {t: 30, v: 5}, {t: 30, v: 5},
 				{t: 50, v: 1}, {t: 70, v: 10}, {t: 70, v: 10},
 				{t: 120, v: 1}, {t: 140, v: 20}, {t: 140, v: 20},
 				{t: 160, v: 21}, {t: 180, v: 40}, {t: 180, v: 40},
 			},
-			rawCounterIterate: []sample{
+			rawCounterIterate: []sample[float64]{
 				{t: 10, v: 1}, {t: 30, v: 5},
 				{t: 50, v: 6}, {t: 70, v: 15},
 				{t: 120, v: 16}, {t: 140, v: 35},
@@ -117,11 +117,11 @@ func TestDownsampleCounterBoundaryReset(t *testing.T) {
 			},
 			aggrAggrResolution: 2 * 50,
 			aggrChunks:         2,
-			aggrCounterSamples: []sample{
+			aggrCounterSamples: []sample[float64]{
 				{t: 10, v: 1}, {t: 70, v: 15}, {t: 70, v: 10},
 				{t: 120, v: 1}, {t: 180, v: 40}, {t: 180, v: 40},
 			},
-			aggrCounterIterate: []sample{
+			aggrCounterIterate: []sample[float64]{
 				{t: 10, v: 1}, {t: 70, v: 15},
 				{t: 120, v: 16}, {t: 180, v: 55},
 			},
@@ -131,14 +131,14 @@ func TestDownsampleCounterBoundaryReset(t *testing.T) {
 	doTest := func(t *testing.T, test *test) {
 		// Asking for more chunks than raw samples ensures that downsampleRawLoop
 		// will create chunks with samples from a single window.
-		cm := downsampleRawLoop(test.raw, test.rawAggrResolution, len(test.raw)+1, false)
+		cm := downsampleRawLoop(test.raw, test.rawAggrResolution, len(test.raw)+1)
 		testutil.Equals(t, test.expectedRawAggrChunks, len(cm))
 
 		rawAggrChunks := toAggrChunks(t, cm)
 		testutil.Equals(t, test.rawCounterSamples, counterSamples(t, rawAggrChunks))
 		testutil.Equals(t, test.rawCounterIterate, counterIterate(t, rawAggrChunks))
 
-		var buf []sample
+		var buf []sample[float64]
 		acm, err := downsampleAggrLoop(rawAggrChunks, &buf, test.aggrAggrResolution, test.aggrChunks)
 		testutil.Ok(t, err)
 		testutil.Equals(t, test.aggrChunks, len(acm))
@@ -155,22 +155,22 @@ func TestExpandChunkIterator(t *testing.T) {
 	// Validate that expanding the chunk iterator filters out-of-order samples
 	// and staleness markers.
 	// Same timestamps are okay since we use them for counter markers.
-	var res []sample
+	var res []sample[float64]
 	testutil.Ok(t,
 		expandChunkIterator(
-			newSampleIterator([]sample{
+			newSampleIterator([]sample[float64]{
 				{t: 100, v: 1}, {t: 200, v: 2}, {t: 200, v: 3}, {t: 201, v: 4}, {t: 200, v: 5},
-				{t: 300, v: 6}, {t: 400, v: math.Float64frombits(value.StaleNaN)}, {t: 500, v: 5},
+				{t: 300, v: 6}, {t: 400, v: math.Float64frombits(prometheus_value.StaleNaN)}, {t: 500, v: 5},
 			}), &res,
 		),
 	)
 
-	testutil.Equals(t, []sample{{t: 100, v: 1}, {t: 200, v: 2}, {t: 200, v: 3}, {t: 201, v: 4}, {t: 300, v: 6}, {t: 500, v: 5}}, res)
+	testutil.Equals(t, []sample[float64]{{t: 100, v: 1}, {t: 200, v: 2}, {t: 200, v: 3}, {t: 201, v: 4}, {t: 300, v: 6}, {t: 500, v: 5}}, res)
 }
 
 var (
 	// Decoded excerpt of pkg/query/testdata/issue2401-seriesresponses.json without overlaps (downsampling works directly on blocks).
-	realisticChkDataWithStaleMarker = [][]sample{
+	realisticChkDataWithStaleMarker = [][]sample[float64]{
 		{
 			{t: 1587690005791, v: 461968}, {t: 1587690020791, v: 462151}, {t: 1587690035797, v: 462336}, {t: 1587690050791, v: 462650}, {t: 1587690065791, v: 462813}, {t: 1587690080791, v: 462987}, {t: 1587690095791, v: 463095}, {t: 1587690110791, v: 463247}, {t: 1587690125791, v: 463440}, {t: 1587690140791, v: 463642},
 			{t: 1587690155791, v: 463811}, {t: 1587690170791, v: 464027}, {t: 1587690185791, v: 464308}, {t: 1587690200791, v: 464514}, {t: 1587690215791, v: 464798}, {t: 1587690230791, v: 465018}, {t: 1587690245791, v: 465215}, {t: 1587690260813, v: 465431}, {t: 1587690275791, v: 465651}, {t: 1587690290791, v: 465870},
@@ -190,7 +190,7 @@ var (
 			{t: 1587691955791, v: 490048}, {t: 1587691970791, v: 490364}, {t: 1587691985791, v: 490485}, {t: 1587692000791, v: 490722}, {t: 1587692015791, v: 490866}, {t: 1587692030791, v: 491025}, {t: 1587692045791, v: 491286}, {t: 1587692060816, v: 491543}, {t: 1587692075791, v: 491787}, {t: 1587692090791, v: 492065},
 			{t: 1587692105791, v: 492223}, {t: 1587692120816, v: 492501}, {t: 1587692135791, v: 492767}, {t: 1587692150791, v: 492955}, {t: 1587692165791, v: 493194}, {t: 1587692180792, v: 493402}, {t: 1587692195791, v: 493647}, {t: 1587692210791, v: 493897}, {t: 1587692225791, v: 494117}, {t: 1587692240805, v: 494356},
 			{t: 1587692255791, v: 494620}, {t: 1587692270791, v: 494762}, {t: 1587692285791, v: 495001}, {t: 1587692300805, v: 495222}, {t: 1587692315791, v: 495393}, {t: 1587692330791, v: 495662}, {t: 1587692345791, v: 495875}, {t: 1587692360801, v: 496082}, {t: 1587692375791, v: 496196}, {t: 1587692390791, v: 496245},
-			{t: 1587692405791, v: 496295}, {t: 1587692420791, v: 496365}, {t: 1587692435791, v: 496401}, {t: 1587692450791, v: 496452}, {t: 1587692465791, v: 496491}, {t: 1587692480791, v: 496544}, {t: 1587692495791, v: math.Float64frombits(value.StaleNaN)}, {t: 1587692555791, v: 75}, {t: 1587692570791, v: 308}, {t: 1587692585791, v: 508},
+			{t: 1587692405791, v: 496295}, {t: 1587692420791, v: 496365}, {t: 1587692435791, v: 496401}, {t: 1587692450791, v: 496452}, {t: 1587692465791, v: 496491}, {t: 1587692480791, v: 496544}, {t: 1587692495791, v: math.Float64frombits(prometheus_value.StaleNaN)}, {t: 1587692555791, v: 75}, {t: 1587692570791, v: 308}, {t: 1587692585791, v: 508},
 			{t: 1587692600791, v: 701}, {t: 1587692615791, v: 985}, {t: 1587692630791, v: 1153}, {t: 1587692645791, v: 1365}, {t: 1587692660791, v: 1612}, {t: 1587692675803, v: 1922}, {t: 1587692690791, v: 2103}, {t: 1587692705791, v: 2261}, {t: 1587692720791, v: 2469}, {t: 1587692735805, v: 2625},
 			{t: 1587692750791, v: 2801}, {t: 1587692765791, v: 2955}, {t: 1587692780791, v: 3187}, {t: 1587692795806, v: 3428}, {t: 1587692810791, v: 3657}, {t: 1587692825791, v: 3810}, {t: 1587692840791, v: 3968}, {t: 1587692855791, v: 4195}, {t: 1587692870791, v: 4414}, {t: 1587692885791, v: 4646},
 			{t: 1587692900791, v: 4689}, {t: 1587692915791, v: 4847}, {t: 1587692930791, v: 5105}, {t: 1587692945791, v: 5309}, {t: 1587692960791, v: 5521}, {t: 1587692975791, v: 5695}, {t: 1587692990810, v: 6010}, {t: 1587693005791, v: 6210}, {t: 1587693020791, v: 6394}, {t: 1587693035791, v: 6597},
@@ -200,7 +200,7 @@ var (
 			{t: 1587693500791, v: 13603}, {t: 1587693515791, v: 13927}, {t: 1587693530816, v: 14122}, {t: 1587693545791, v: 14327}, {t: 1587693560791, v: 14579}, {t: 1587693575791, v: 14759}, {t: 1587693590791, v: 14956},
 		},
 	}
-	realisticChkDataWithCounterResetRes5m = []map[AggrType][]sample{
+	realisticChkDataWithCounterResetRes5m = []map[AggrType][]sample[float64]{
 		{
 			AggrCount:   {{t: 1587690299999, v: 20}, {t: 1587690599999, v: 20}, {t: 1587690899999, v: 20}, {t: 1587691199999, v: 20}, {t: 1587691499999, v: 20}, {t: 1587691799999, v: 20}, {t: 1587692099999, v: 20}, {t: 1587692399999, v: 20}, {t: 1587692699999, v: 16}, {t: 1587692999999, v: 20}, {t: 1587693299999, v: 20}, {t: 1587693590791, v: 20}},
 			AggrSum:     {{t: 1587690299999, v: 9.276972e+06}, {t: 1587690599999, v: 9.359861e+06}, {t: 1587690899999, v: 9.447457e+06}, {t: 1587691199999, v: 9.542732e+06}, {t: 1587691499999, v: 9.630379e+06}, {t: 1587691799999, v: 9.715631e+06}, {t: 1587692099999, v: 9.799808e+06}, {t: 1587692399999, v: 9.888117e+06}, {t: 1587692699999, v: 2.98928e+06}, {t: 1587692999999, v: 81592}, {t: 1587693299999, v: 163711}, {t: 1587693590791, v: 255746}},
@@ -216,23 +216,23 @@ func TestDownsample(t *testing.T) {
 		name string
 
 		// Either inRaw or inAggr should be provided.
-		inRaw      [][]sample
-		inAggr     []map[AggrType][]sample
+		inRaw      [][]sample[float64]
+		inAggr     []map[AggrType][]sample[float64]
 		resolution int64
 
 		// Expected output.
-		expected                []map[AggrType][]sample
+		expected                []map[AggrType][]sample[float64]
 		expectedDownsamplingErr func([]chunks.Meta) error
 	}
 	for _, tcase := range []*downsampleTestCase{
 		{
 			name: "single chunk",
-			inRaw: [][]sample{
-				{{t: 20, v: 1}, {t: 40, v: 2}, {t: 60, v: 3}, {t: 80, v: 1}, {t: 100, v: 2}, {t: 101, v: math.Float64frombits(value.StaleNaN)}, {t: 120, v: 5}, {t: 180, v: 10}, {t: 250, v: 1}},
+			inRaw: [][]sample[float64]{
+				{{t: 20, v: 1}, {t: 40, v: 2}, {t: 60, v: 3}, {t: 80, v: 1}, {t: 100, v: 2}, {t: 101, v: math.Float64frombits(prometheus_value.StaleNaN)}, {t: 120, v: 5}, {t: 180, v: 10}, {t: 250, v: 1}},
 			},
 			resolution: 100,
 
-			expected: []map[AggrType][]sample{
+			expected: []map[AggrType][]sample[float64]{
 				{
 					AggrCount:   {{t: 99, v: 4}, {t: 199, v: 3}, {t: 250, v: 1}},
 					AggrSum:     {{t: 99, v: 7}, {t: 199, v: 17}, {t: 250, v: 1}},
@@ -244,14 +244,14 @@ func TestDownsample(t *testing.T) {
 		},
 		{
 			name: "three chunks",
-			inRaw: [][]sample{
-				{{t: 20, v: 1}, {t: 40, v: 2}, {t: 60, v: 3}, {t: 80, v: 1}, {t: 100, v: 2}, {t: 101, v: math.Float64frombits(value.StaleNaN)}, {t: 120, v: 5}, {t: 180, v: 10}, {t: 250, v: 2}},
+			inRaw: [][]sample[float64]{
+				{{t: 20, v: 1}, {t: 40, v: 2}, {t: 60, v: 3}, {t: 80, v: 1}, {t: 100, v: 2}, {t: 101, v: math.Float64frombits(prometheus_value.StaleNaN)}, {t: 120, v: 5}, {t: 180, v: 10}, {t: 250, v: 2}},
 				{{t: 260, v: 1}, {t: 300, v: 10}, {t: 340, v: 15}, {t: 380, v: 25}, {t: 420, v: 35}},
-				{{t: 460, v: math.Float64frombits(value.StaleNaN)}, {t: 500, v: 10}, {t: 540, v: 3}},
+				{{t: 460, v: math.Float64frombits(prometheus_value.StaleNaN)}, {t: 500, v: 10}, {t: 540, v: 3}},
 			},
 			resolution: 100,
 
-			expected: []map[AggrType][]sample{
+			expected: []map[AggrType][]sample[float64]{
 				{
 					AggrCount:   {{t: 99, v: 4}, {t: 199, v: 3}, {t: 299, v: 2}, {t: 399, v: 3}, {t: 499, v: 1}, {t: 540, v: 2}},
 					AggrSum:     {{t: 99, v: 7}, {t: 199, v: 17}, {t: 299, v: 3}, {t: 399, v: 50}, {t: 499, v: 35}, {t: 540, v: 13}},
@@ -263,11 +263,11 @@ func TestDownsample(t *testing.T) {
 		},
 		{
 			name: "four chunks, two of them overlapping",
-			inRaw: [][]sample{
-				{{t: 20, v: 1}, {t: 40, v: 2}, {t: 60, v: 3}, {t: 80, v: 1}, {t: 100, v: 2}, {t: 101, v: math.Float64frombits(value.StaleNaN)}, {t: 120, v: 5}, {t: 180, v: 10}, {t: 250, v: 2}},
-				{{t: 20, v: 1}, {t: 40, v: 2}, {t: 60, v: 3}, {t: 80, v: 1}, {t: 100, v: 2}, {t: 101, v: math.Float64frombits(value.StaleNaN)}, {t: 120, v: 5}, {t: 180, v: 10}, {t: 250, v: 2}},
+			inRaw: [][]sample[float64]{
+				{{t: 20, v: 1}, {t: 40, v: 2}, {t: 60, v: 3}, {t: 80, v: 1}, {t: 100, v: 2}, {t: 101, v: math.Float64frombits(prometheus_value.StaleNaN)}, {t: 120, v: 5}, {t: 180, v: 10}, {t: 250, v: 2}},
+				{{t: 20, v: 1}, {t: 40, v: 2}, {t: 60, v: 3}, {t: 80, v: 1}, {t: 100, v: 2}, {t: 101, v: math.Float64frombits(prometheus_value.StaleNaN)}, {t: 120, v: 5}, {t: 180, v: 10}, {t: 250, v: 2}},
 				{{t: 260, v: 1}, {t: 300, v: 10}, {t: 340, v: 15}, {t: 380, v: 25}, {t: 420, v: 35}},
-				{{t: 460, v: math.Float64frombits(value.StaleNaN)}, {t: 500, v: 10}, {t: 540, v: 3}},
+				{{t: 460, v: math.Float64frombits(prometheus_value.StaleNaN)}, {t: 500, v: 10}, {t: 540, v: 3}},
 			},
 			resolution: 100,
 
@@ -285,7 +285,7 @@ func TestDownsample(t *testing.T) {
 		// Aggregated -> Downsampled Aggregated.
 		{
 			name: "single aggregated chunks",
-			inAggr: []map[AggrType][]sample{
+			inAggr: []map[AggrType][]sample[float64]{
 				{
 					AggrCount: {{t: 199, v: 5}, {t: 299, v: 1}, {t: 399, v: 10}, {t: 400, v: 3}, {t: 499, v: 10}, {t: 699}, {t: 999, v: 100}},
 					AggrSum:   {{t: 199, v: 5}, {t: 299, v: 1}, {t: 399, v: 10}, {t: 400, v: 3}, {t: 499, v: 10}, {t: 699}, {t: 999, v: 100}},
@@ -300,7 +300,7 @@ func TestDownsample(t *testing.T) {
 			},
 			resolution: 500,
 
-			expected: []map[AggrType][]sample{
+			expected: []map[AggrType][]sample[float64]{
 				{
 					AggrCount:   {{t: 499, v: 29}, {t: 999, v: 100}},
 					AggrSum:     {{t: 499, v: 29}, {t: 999, v: 100}},
@@ -311,7 +311,7 @@ func TestDownsample(t *testing.T) {
 			},
 		},
 		func() *downsampleTestCase {
-			downsample500resolutionChunk := []map[AggrType][]sample{
+			downsample500resolutionChunk := []map[AggrType][]sample[float64]{
 				{
 					AggrCount:   {{t: 499, v: 29}, {t: 999, v: 100}},
 					AggrSum:     {{t: 499, v: 29}, {t: 999, v: 100}},
@@ -331,7 +331,7 @@ func TestDownsample(t *testing.T) {
 		}(),
 		{
 			name: "two aggregated chunks",
-			inAggr: []map[AggrType][]sample{
+			inAggr: []map[AggrType][]sample[float64]{
 				{
 					AggrCount: {{t: 199, v: 5}, {t: 299, v: 1}, {t: 399, v: 10}, {t: 400, v: 3}, {t: 499, v: 10}, {t: 699}, {t: 999, v: 100}},
 					AggrSum:   {{t: 199, v: 5}, {t: 299, v: 1}, {t: 399, v: 10}, {t: 400, v: 3}, {t: 499, v: 10}, {t: 699}, {t: 999, v: 100}},
@@ -357,7 +357,7 @@ func TestDownsample(t *testing.T) {
 			},
 			resolution: 500,
 
-			expected: []map[AggrType][]sample{
+			expected: []map[AggrType][]sample[float64]{
 				{
 					AggrCount:   {{t: 499, v: 29}, {t: 999, v: 100}, {t: 1499, v: 23}, {t: 1999, v: 100}},
 					AggrSum:     {{t: 499, v: 29}, {t: 999, v: 100}, {t: 1499, v: 23}, {t: 1999, v: 100}},
@@ -369,7 +369,7 @@ func TestDownsample(t *testing.T) {
 		},
 		{
 			name: "two aggregated, overlapping chunks",
-			inAggr: []map[AggrType][]sample{
+			inAggr: []map[AggrType][]sample[float64]{
 				{
 					AggrCount: {{t: 199, v: 5}, {t: 299, v: 1}, {t: 399, v: 10}, {t: 400, v: 3}, {t: 499, v: 10}, {t: 699}, {t: 999, v: 100}},
 				},
@@ -385,7 +385,7 @@ func TestDownsample(t *testing.T) {
 		},
 		{
 			name: "realistic ResLevel1 (5m) downsampled chunks with from counter resets",
-			inAggr: []map[AggrType][]sample{
+			inAggr: []map[AggrType][]sample[float64]{
 				{
 					AggrCount:   {{t: 1587690299999, v: 20}, {t: 1587690599999, v: 20}, {t: 1587690899999, v: 20}, {t: 1587691199999, v: 20}, {t: 1587691499999, v: 20}, {t: 1587691799999, v: 20}, {t: 1587692099999, v: 20}, {t: 1587692399999, v: 20}, {t: 1587692699999, v: 16}, {t: 1587692999999, v: 20}, {t: 1587693299999, v: 20}, {t: 1587693590791, v: 20}},
 					AggrSum:     {{t: 1587690299999, v: 9.276972e+06}, {t: 1587690599999, v: 9.359861e+06}, {t: 1587690899999, v: 9.447457e+06}, {t: 1587691199999, v: 9.542732e+06}, {t: 1587691499999, v: 9.630379e+06}, {t: 1587691799999, v: 9.715631e+06}, {t: 1587692099999, v: 9.799808e+06}, {t: 1587692399999, v: 9.888117e+06}, {t: 1587692699999, v: 2.98928e+06}, {t: 1587692999999, v: 81592}, {t: 1587693299999, v: 163711}, {t: 1587693590791, v: 255746}},
@@ -396,7 +396,7 @@ func TestDownsample(t *testing.T) {
 			},
 			resolution: ResLevel2,
 
-			expected: []map[AggrType][]sample{
+			expected: []map[AggrType][]sample[float64]{
 				{
 					AggrCount:   {{t: 1587693590791, v: 236}},
 					AggrSum:     {{t: 1587693590791, v: 8.0151286e+07}},
@@ -411,22 +411,22 @@ func TestDownsample(t *testing.T) {
 			d := &downsampleTestCase{
 				name:       "downsampling four, 120 sample chunks for 2x resolution should result in two chunks, but results in one.",
 				resolution: 2,
-				inAggr:     []map[AggrType][]sample{{AggrCounter: {}}, {AggrCounter: {}}, {AggrCounter: {}}, {AggrCounter: {}}},
-				expected:   []map[AggrType][]sample{{AggrCounter: {}}},
+				inAggr:     []map[AggrType][]sample[float64]{{AggrCounter: {}}, {AggrCounter: {}}, {AggrCounter: {}}, {AggrCounter: {}}},
+				expected:   []map[AggrType][]sample[float64]{{AggrCounter: {}}},
 			}
 
 			for i := int64(0); i < 120; i++ {
-				d.inAggr[0][AggrCounter] = append(d.inAggr[0][AggrCounter], sample{t: i, v: float64(i)})
-				d.inAggr[1][AggrCounter] = append(d.inAggr[1][AggrCounter], sample{t: 120 + i, v: float64(120 + i)})
-				d.inAggr[2][AggrCounter] = append(d.inAggr[2][AggrCounter], sample{t: 240 + i, v: float64(240 + i)})
-				d.inAggr[3][AggrCounter] = append(d.inAggr[3][AggrCounter], sample{t: 360 + i, v: float64(360 + i)})
+				d.inAggr[0][AggrCounter] = append(d.inAggr[0][AggrCounter], sample[float64]{t: i, v: float64(i)})
+				d.inAggr[1][AggrCounter] = append(d.inAggr[1][AggrCounter], sample[float64]{t: 120 + i, v: float64(120 + i)})
+				d.inAggr[2][AggrCounter] = append(d.inAggr[2][AggrCounter], sample[float64]{t: 240 + i, v: float64(240 + i)})
+				d.inAggr[3][AggrCounter] = append(d.inAggr[3][AggrCounter], sample[float64]{t: 360 + i, v: float64(360 + i)})
 			}
 
-			d.expected[0][AggrCounter] = append(d.expected[0][AggrCounter], sample{t: 0, v: float64(0)})
+			d.expected[0][AggrCounter] = append(d.expected[0][AggrCounter], sample[float64]{t: 0, v: float64(0)})
 			for i := int64(0); i < 480; i += 2 {
-				d.expected[0][AggrCounter] = append(d.expected[0][AggrCounter], sample{t: 1 + i, v: float64(1 + i)})
+				d.expected[0][AggrCounter] = append(d.expected[0][AggrCounter], sample[float64]{t: 1 + i, v: float64(1 + i)})
 			}
-			d.expected[0][AggrCounter] = append(d.expected[0][AggrCounter], sample{t: 479, v: 479})
+			d.expected[0][AggrCounter] = append(d.expected[0][AggrCounter], sample[float64]{t: 479, v: 479})
 
 			return d
 		}(),
@@ -484,12 +484,12 @@ func TestDownsample(t *testing.T) {
 			lset = builder.Labels()
 			testutil.Equals(t, labels.FromStrings("__name__", "a"), lset)
 
-			var got []map[AggrType][]sample
+			var got []map[AggrType][]sample[float64]
 			for _, c := range chks {
 				chk, err := chunkr.Chunk(c)
 				testutil.Ok(t, err)
 
-				m := map[AggrType][]sample{}
+				m := map[AggrType][]sample[float64]{}
 				for _, at := range []AggrType{AggrCount, AggrSum, AggrMin, AggrMax, AggrCounter} {
 					c, err := chk.(*AggrChunk).Get(at)
 					if err == ErrAggrNotExist {
@@ -513,7 +513,7 @@ func TestDownsampleAggrAndEmptyXORChunks(t *testing.T) {
 	dir := t.TempDir()
 
 	ser := &series{lset: labels.FromStrings("__name__", "a")}
-	aggr := map[AggrType][]sample{
+	aggr := map[AggrType][]sample[float64]{
 		AggrCount:   {{t: 1587690299999, v: 20}, {t: 1587690599999, v: 20}, {t: 1587690899999, v: 20}, {t: 1587691199999, v: 20}, {t: 1587691499999, v: 20}, {t: 1587691799999, v: 20}, {t: 1587692099999, v: 20}, {t: 1587692399999, v: 20}, {t: 1587692699999, v: 16}, {t: 1587692999999, v: 20}, {t: 1587693299999, v: 20}, {t: 1587693590791, v: 20}},
 		AggrSum:     {{t: 1587690299999, v: 9.276972e+06}, {t: 1587690599999, v: 9.359861e+06}, {t: 1587690899999, v: 9.447457e+06}, {t: 1587691199999, v: 9.542732e+06}, {t: 1587691499999, v: 9.630379e+06}, {t: 1587691799999, v: 9.715631e+06}, {t: 1587692099999, v: 9.799808e+06}, {t: 1587692399999, v: 9.888117e+06}, {t: 1587692699999, v: 2.98928e+06}, {t: 1587692999999, v: 81592}, {t: 1587693299999, v: 163711}, {t: 1587693590791, v: 255746}},
 		AggrMin:     {{t: 1587690299999, v: 461968}, {t: 1587690599999, v: 466070}, {t: 1587690899999, v: 470131}, {t: 1587691199999, v: 474913}, {t: 1587691499999, v: 479625}, {t: 1587691799999, v: 483709}, {t: 1587692099999, v: 488036}, {t: 1587692399999, v: 492223}, {t: 1587692699999, v: 75}, {t: 1587692999999, v: 2261}, {t: 1587693299999, v: 6210}, {t: 1587693590791, v: 10464}},
@@ -542,7 +542,7 @@ func TestDownsampleAggrAndNonEmptyXORChunks(t *testing.T) {
 	dir := t.TempDir()
 
 	ser := &series{lset: labels.FromStrings("__name__", "a")}
-	aggr := map[AggrType][]sample{
+	aggr := map[AggrType][]sample[float64]{
 		AggrCount:   {{t: 1587690299999, v: 20}, {t: 1587690599999, v: 20}, {t: 1587690899999, v: 20}, {t: 1587691199999, v: 20}, {t: 1587691499999, v: 20}, {t: 1587691799999, v: 20}, {t: 1587692099999, v: 20}, {t: 1587692399999, v: 20}, {t: 1587692699999, v: 16}, {t: 1587692999999, v: 20}, {t: 1587693299999, v: 20}, {t: 1587693590791, v: 20}},
 		AggrSum:     {{t: 1587690299999, v: 9.276972e+06}, {t: 1587690599999, v: 9.359861e+06}, {t: 1587690899999, v: 9.447457e+06}, {t: 1587691199999, v: 9.542732e+06}, {t: 1587691499999, v: 9.630379e+06}, {t: 1587691799999, v: 9.715631e+06}, {t: 1587692099999, v: 9.799808e+06}, {t: 1587692399999, v: 9.888117e+06}, {t: 1587692699999, v: 2.98928e+06}, {t: 1587692999999, v: 81592}, {t: 1587693299999, v: 163711}, {t: 1587693590791, v: 255746}},
 		AggrMin:     {{t: 1587690299999, v: 461968}, {t: 1587690599999, v: 466070}, {t: 1587690899999, v: 470131}, {t: 1587691199999, v: 474913}, {t: 1587691499999, v: 479625}, {t: 1587691799999, v: 483709}, {t: 1587692099999, v: 488036}, {t: 1587692399999, v: 492223}, {t: 1587692699999, v: 75}, {t: 1587692999999, v: 2261}, {t: 1587693299999, v: 6210}, {t: 1587693590791, v: 10464}},
@@ -626,12 +626,12 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	testutil.Equals(t, labels.FromStrings("__name__", "a"), lset)
 
 	expected := []struct {
-		count   []sample
-		sum     []sample
-		counter []sample
+		count   []sample[float64]
+		sum     []sample[float64]
+		counter []sample[float64]
 	}{
 		{
-			count: []sample{{t: 399, v: 1}, {t: 799, v: 2}, {t: 800, v: 1}},
+			count: []sample[float64]{{t: 399, v: 1}, {t: 799, v: 2}, {t: 800, v: 1}},
 		},
 	}
 
@@ -647,41 +647,41 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	}
 }
 
-func expandHistogramAggregatorChunk(t *testing.T, c *AggrChunk) ([]sample, []sample, []sample) {
+func expandHistogramAggregatorChunk(t *testing.T, c *AggrChunk) ([]sample[float64], []sample[*histogram.FloatHistogram], []sample[*histogram.FloatHistogram]) {
 	countChunk, err := c.Get(AggrCount)
 	testutil.Ok(t, err, "get histogram aggregator count chunk")
-	var count []sample
+	var count []sample[float64]
 	it := countChunk.Iterator(nil)
 	for it.Next() != chunkenc.ValNone {
 		t, v := it.At()
-		count = append(count, sample{t: t, v: v})
+		count = append(count, sample[float64]{t: t, v: v})
 	}
 	testutil.Ok(t, it.Err())
 
 	sumChunk, err := c.Get(AggrSum)
 	testutil.Ok(t, err, "get histogram aggregator sum chunk")
-	var sum []sample
+	var sum []sample[*histogram.FloatHistogram]
 	it = sumChunk.Iterator(nil)
 	for it.Next() != chunkenc.ValNone {
 		t, fh := it.AtFloatHistogram()
-		sum = append(sum, sample{t, 0, fh})
+		sum = append(sum, sample[*histogram.FloatHistogram]{t: t, v: fh})
 	}
 	testutil.Ok(t, it.Err())
 
 	counterChunk, err := c.Get(AggrCounter)
 	testutil.Ok(t, err, "get histogram aggregator counter chunk")
-	var counter []sample
+	var counter []sample[*histogram.FloatHistogram]
 	it = counterChunk.Iterator(nil)
 	for it.Next() != chunkenc.ValNone {
 		t, fh := it.AtFloatHistogram()
-		counter = append(counter, sample{t, 0, fh})
+		counter = append(counter, sample[*histogram.FloatHistogram]{t: t, v: fh})
 	}
 	testutil.Ok(t, it.Err())
 
 	return count, sum, counter
 }
 
-func chunksToSeriesIteratable(t *testing.T, inRaw [][]sample, inAggr []map[AggrType][]sample) *series {
+func chunksToSeriesIteratable(t *testing.T, inRaw [][]sample[float64], inAggr []map[AggrType][]sample[float64]) *series {
 	if len(inRaw) > 0 && len(inAggr) > 0 {
 		t.Fatalf("test must not have raw and aggregate input data at once")
 	}
@@ -709,7 +709,7 @@ func chunksToSeriesIteratable(t *testing.T, inRaw [][]sample, inAggr []map[AggrT
 	}
 	return ser
 }
-func encodeTestAggrSeries(v map[AggrType][]sample) chunks.Meta {
+func encodeTestAggrSeries(v map[AggrType][]sample[float64]) chunks.Meta {
 	b := newAggrChunkBuilder()
 	// we cannot use `b.add` as we have separate samples, do it manually, but make sure to
 	// calculate overall chunk time ranges.
@@ -728,23 +728,23 @@ func encodeTestAggrSeries(v map[AggrType][]sample) chunks.Meta {
 }
 
 func TestAverageChunkIterator(t *testing.T) {
-	sum := []sample{{t: 100, v: 30}, {t: 200, v: 40}, {t: 300, v: 5}, {t: 400, v: -10}}
-	cnt := []sample{{t: 100, v: 1}, {t: 200, v: 5}, {t: 300, v: 2}, {t: 400, v: 10}}
-	exp := []sample{{t: 100, v: 30}, {t: 200, v: 8}, {t: 300, v: 2.5}, {t: 400, v: -1}}
+	sum := []sample[float64]{{t: 100, v: 30}, {t: 200, v: 40}, {t: 300, v: 5}, {t: 400, v: -10}}
+	cnt := []sample[float64]{{t: 100, v: 1}, {t: 200, v: 5}, {t: 300, v: 2}, {t: 400, v: 10}}
+	exp := []sample[float64]{{t: 100, v: 30}, {t: 200, v: 8}, {t: 300, v: 2.5}, {t: 400, v: -1}}
 
 	x := NewAverageChunkIterator(newSampleIterator(cnt), newSampleIterator(sum))
 
-	var res []sample
+	var res []sample[float64]
 	for x.Next() != chunkenc.ValNone {
 		t, v := x.At()
-		res = append(res, sample{t: t, v: v})
+		res = append(res, sample[float64]{t: t, v: v})
 	}
 	testutil.Ok(t, x.Err())
 	testutil.Equals(t, exp, res)
 }
 
 var (
-	realisticChkDataWithCounterResetsAfterCounterSeriesIterating = []sample{
+	realisticChkDataWithCounterResetsAfterCounterSeriesIterating = []sample[float64]{
 		{t: 1587690005791, v: 461968}, {t: 1587690020791, v: 462151}, {t: 1587690035797, v: 462336}, {t: 1587690050791, v: 462650}, {t: 1587690065791, v: 462813}, {t: 1587690080791, v: 462987}, {t: 1587690095791, v: 463095}, {t: 1587690110791, v: 463247}, {t: 1587690125791, v: 463440}, {t: 1587690140791, v: 463642}, {t: 1587690155791, v: 463811},
 		{t: 1587690170791, v: 464027}, {t: 1587690185791, v: 464308}, {t: 1587690200791, v: 464514}, {t: 1587690215791, v: 464798}, {t: 1587690230791, v: 465018}, {t: 1587690245791, v: 465215}, {t: 1587690260813, v: 465431}, {t: 1587690275791, v: 465651}, {t: 1587690290791, v: 465870}, {t: 1587690305791, v: 466070}, {t: 1587690320792, v: 466248},
 		{t: 1587690335791, v: 466506}, {t: 1587690350791, v: 466766}, {t: 1587690365791, v: 466970}, {t: 1587690380791, v: 467123}, {t: 1587690395791, v: 467265}, {t: 1587690410791, v: 467383}, {t: 1587690425791, v: 467629}, {t: 1587690440791, v: 467931}, {t: 1587690455791, v: 468097}, {t: 1587690470791, v: 468281}, {t: 1587690485791, v: 468477},
@@ -774,20 +774,20 @@ func TestApplyCounterResetsIterator(t *testing.T) {
 	for _, tcase := range []struct {
 		name string
 
-		chunks [][]sample
+		chunks [][]sample[float64]
 
-		expected []sample
+		expected []sample[float64]
 	}{
 		{
 			name: "series with stale marker",
-			chunks: [][]sample{
+			chunks: [][]sample[float64]{
 				{{t: 100, v: 10}, {t: 200, v: 20}, {t: 300, v: 10}, {t: 400, v: 20}, {t: 400, v: 5}},
-				{{t: 500, v: 10}, {t: 600, v: 20}, {t: 700, v: 30}, {t: 800, v: 40}, {t: 800, v: 10}},    // No reset, just downsampling addded sample at the end.
-				{{t: 900, v: 5}, {t: 1000, v: 10}, {t: 1100, v: 15}},                                     // Actual reset.
-				{{t: 1200, v: 20}, {t: 1250, v: math.Float64frombits(value.StaleNaN)}, {t: 1300, v: 40}}, // No special last sample, no reset.
-				{{t: 1400, v: 30}, {t: 1500, v: 30}, {t: 1600, v: 50}},                                   // No special last sample, reset.
+				{{t: 500, v: 10}, {t: 600, v: 20}, {t: 700, v: 30}, {t: 800, v: 40}, {t: 800, v: 10}},               // No reset, just downsampling addded sample at the end.
+				{{t: 900, v: 5}, {t: 1000, v: 10}, {t: 1100, v: 15}},                                                // Actual reset.
+				{{t: 1200, v: 20}, {t: 1250, v: math.Float64frombits(prometheus_value.StaleNaN)}, {t: 1300, v: 40}}, // No special last sample, no reset.
+				{{t: 1400, v: 30}, {t: 1500, v: 30}, {t: 1600, v: 50}},                                              // No special last sample, reset.
 			},
-			expected: []sample{
+			expected: []sample[float64]{
 				{t: 100, v: 10}, {t: 200, v: 20}, {t: 300, v: 30}, {t: 400, v: 40}, {t: 500, v: 45},
 				{t: 600, v: 55}, {t: 700, v: 65}, {t: 800, v: 75}, {t: 900, v: 80}, {t: 1000, v: 85},
 				{t: 1100, v: 90}, {t: 1200, v: 95}, {t: 1300, v: 115}, {t: 1400, v: 145}, {t: 1500, v: 145}, {t: 1600, v: 165},
@@ -801,7 +801,7 @@ func TestApplyCounterResetsIterator(t *testing.T) {
 		{
 			// This can easily happen when querying StoreAPI with same data. Counter series should handle this.
 			name: "realistic raw data with many overlapping chunks with stale markers",
-			chunks: [][]sample{
+			chunks: [][]sample[float64]{
 				realisticChkDataWithStaleMarker[0],
 				realisticChkDataWithStaleMarker[0],
 				realisticChkDataWithStaleMarker[0],
@@ -819,8 +819,8 @@ func TestApplyCounterResetsIterator(t *testing.T) {
 		},
 		{
 			name:   "the same above input (realisticChkDataWithStaleMarker), but after 5m downsampling",
-			chunks: [][]sample{realisticChkDataWithCounterResetRes5m[0][AggrCounter]},
-			expected: []sample{
+			chunks: [][]sample[float64]{realisticChkDataWithCounterResetRes5m[0][AggrCounter]},
+			expected: []sample[float64]{
 				{t: 1587690005791, v: 461968}, {t: 1587690299999, v: 465870}, {t: 1587690599999, v: 469951}, {t: 1587690899999, v: 474726}, {t: 1587691199999, v: 479368},
 				{t: 1587691499999, v: 483566}, {t: 1587691799999, v: 487787}, {t: 1587692099999, v: 492065}, {t: 1587692399999, v: 496245}, {t: 1587692699999, v: 498647},
 				{t: 1587692999999, v: 502554}, {t: 1587693299999, v: 506786}, {t: 1587693590791, v: 511500},
@@ -835,10 +835,10 @@ func TestApplyCounterResetsIterator(t *testing.T) {
 
 			x := NewApplyCounterResetsIterator(its...)
 
-			var res []sample
+			var res []sample[float64]
 			for x.Next() != chunkenc.ValNone {
 				t, v := x.At()
-				res = append(res, sample{t: t, v: v})
+				res = append(res, sample[float64]{t: t, v: v})
 			}
 			testutil.Ok(t, x.Err())
 			testutil.Equals(t, tcase.expected, res)
@@ -909,11 +909,11 @@ func TestApplyCounterResetsIteratorHistograms(t *testing.T) {
 }
 
 func TestCounterSeriesIteratorSeek(t *testing.T) {
-	chunks := [][]sample{
+	chunks := [][]sample[float64]{
 		{{t: 100, v: 10}, {t: 200, v: 20}, {t: 300, v: 10}, {t: 400, v: 20}, {t: 400, v: 5}},
 	}
 
-	exp := []sample{
+	exp := []sample[float64]{
 		{t: 200, v: 20}, {t: 300, v: 30}, {t: 400, v: 40},
 	}
 
@@ -922,7 +922,7 @@ func TestCounterSeriesIteratorSeek(t *testing.T) {
 		its = append(its, newSampleIterator(c))
 	}
 
-	var res []sample
+	var res []sample[float64]
 	x := NewApplyCounterResetsIterator(its...)
 
 	valueType := x.Seek(150)
@@ -930,7 +930,7 @@ func TestCounterSeriesIteratorSeek(t *testing.T) {
 	testutil.Ok(t, x.Err())
 	for {
 		ts, v := x.At()
-		res = append(res, sample{t: ts, v: v})
+		res = append(res, sample[float64]{t: ts, v: v})
 
 		if x.Next() == chunkenc.ValNone {
 			break
@@ -940,7 +940,7 @@ func TestCounterSeriesIteratorSeek(t *testing.T) {
 }
 
 func TestCounterSeriesIteratorSeekExtendTs(t *testing.T) {
-	chunks := [][]sample{
+	chunks := [][]sample[float64]{
 		{{t: 100, v: 10}, {t: 200, v: 20}, {t: 300, v: 10}, {t: 400, v: 20}, {t: 400, v: 5}},
 	}
 
@@ -956,10 +956,10 @@ func TestCounterSeriesIteratorSeekExtendTs(t *testing.T) {
 }
 
 func TestCounterSeriesIteratorSeekAfterNext(t *testing.T) {
-	chunks := [][]sample{
+	chunks := [][]sample[float64]{
 		{{t: 100, v: 10}},
 	}
-	exp := []sample{
+	exp := []sample[float64]{
 		{t: 100, v: 10},
 	}
 
@@ -968,7 +968,7 @@ func TestCounterSeriesIteratorSeekAfterNext(t *testing.T) {
 		its = append(its, newSampleIterator(c))
 	}
 
-	var res []sample
+	var res []sample[float64]
 	x := NewApplyCounterResetsIterator(its...)
 
 	x.Next()
@@ -978,7 +978,7 @@ func TestCounterSeriesIteratorSeekAfterNext(t *testing.T) {
 	testutil.Ok(t, x.Err())
 	for {
 		ts, v := x.At()
-		res = append(res, sample{t: ts, v: v})
+		res = append(res, sample[float64]{t: ts, v: v})
 
 		if x.Next() == chunkenc.ValNone {
 			break
@@ -993,22 +993,22 @@ func TestSamplesFromTSDBSamples(t *testing.T) {
 
 		input []tsdbutil.Sample
 
-		expected []sample
+		expected []sample[float64]
 	}{
 		{
 			name:     "empty",
 			input:    []tsdbutil.Sample{},
-			expected: []sample{},
+			expected: []sample[float64]{},
 		},
 		{
 			name:     "one sample",
 			input:    []tsdbutil.Sample{testSample{1, 1}},
-			expected: []sample{{t: 1, v: 1}},
+			expected: []sample[float64]{{t: 1, v: 1}},
 		},
 		{
 			name:     "multiple samples",
 			input:    []tsdbutil.Sample{testSample{1, 1}, testSample{2, 2}, testSample{3, 3}, testSample{4, 4}, testSample{5, 5}},
-			expected: []sample{{t: 1, v: 1}, {t: 2, v: 2}, {t: 3, v: 3}, {t: 4, v: 4}, {t: 5, v: 5}},
+			expected: []sample[float64]{{t: 1, v: 1}, {t: 2, v: 2}, {t: 3, v: 3}, {t: 4, v: 4}, {t: 5, v: 5}},
 		},
 	} {
 		t.Run(tcase.name, func(t *testing.T) {
@@ -1045,11 +1045,11 @@ func (s testSample) Type() chunkenc.ValueType {
 }
 
 type sampleIterator struct {
-	l []sample
+	l []sample[float64]
 	i int
 }
 
-func newSampleIterator(l []sample) *sampleIterator {
+func newSampleIterator(l []sample[float64]) *sampleIterator {
 	return &sampleIterator{l: l, i: -1}
 }
 
