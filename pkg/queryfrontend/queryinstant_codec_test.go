@@ -348,7 +348,8 @@ func TestMergeResponse(t *testing.T) {
 								Vector: &queryrange.Vector{
 									Samples: []*queryrange.Sample{
 										{
-											Sample: cortexpb.Sample{TimestampMs: 0, Value: 1},
+											Timestamp:   0,
+											SampleValue: 1,
 											Labels: cortexpb.FromLabelsToLabelAdapters(labels.FromMap(map[string]string{
 												"__name__": "up",
 												"job":      "foo",
@@ -369,7 +370,8 @@ func TestMergeResponse(t *testing.T) {
 								Vector: &queryrange.Vector{
 									Samples: []*queryrange.Sample{
 										{
-											Sample: cortexpb.Sample{TimestampMs: 0, Value: 2},
+											Timestamp:   0,
+											SampleValue: 2,
 											Labels: cortexpb.FromLabelsToLabelAdapters(labels.FromMap(map[string]string{
 												"__name__": "up",
 												"job":      "bar",
@@ -391,14 +393,16 @@ func TestMergeResponse(t *testing.T) {
 							Vector: &queryrange.Vector{
 								Samples: []*queryrange.Sample{
 									{
-										Sample: cortexpb.Sample{TimestampMs: 0, Value: 1},
+										Timestamp:   0,
+										SampleValue: 1,
 										Labels: cortexpb.FromLabelsToLabelAdapters(labels.FromMap(map[string]string{
 											"__name__": "up",
 											"job":      "foo",
 										})),
 									},
 									{
-										Sample: cortexpb.Sample{TimestampMs: 0, Value: 2},
+										Timestamp:   0,
+										SampleValue: 2,
 										Labels: cortexpb.FromLabelsToLabelAdapters(labels.FromMap(map[string]string{
 											"__name__": "up",
 											"job":      "bar",
@@ -426,7 +430,8 @@ func TestMergeResponse(t *testing.T) {
 								Vector: &queryrange.Vector{
 									Samples: []*queryrange.Sample{
 										{
-											Sample: cortexpb.Sample{TimestampMs: 0, Value: 1},
+											Timestamp:   0,
+											SampleValue: 1,
 											Labels: cortexpb.FromLabelsToLabelAdapters(labels.FromMap(map[string]string{
 												"__name__": "up",
 												"job":      "foo",
@@ -447,7 +452,8 @@ func TestMergeResponse(t *testing.T) {
 								Vector: &queryrange.Vector{
 									Samples: []*queryrange.Sample{
 										{
-											Sample: cortexpb.Sample{TimestampMs: 0, Value: 2},
+											Timestamp:   0,
+											SampleValue: 2,
 											Labels: cortexpb.FromLabelsToLabelAdapters(labels.FromMap(map[string]string{
 												"__name__": "up",
 												"job":      "bar",
@@ -469,14 +475,16 @@ func TestMergeResponse(t *testing.T) {
 							Vector: &queryrange.Vector{
 								Samples: []*queryrange.Sample{
 									{
-										Sample: cortexpb.Sample{TimestampMs: 0, Value: 1},
+										Timestamp:   0,
+										SampleValue: 1,
 										Labels: cortexpb.FromLabelsToLabelAdapters(labels.FromMap(map[string]string{
 											"__name__": "up",
 											"job":      "foo",
 										})),
 									},
 									{
-										Sample: cortexpb.Sample{TimestampMs: 0, Value: 2},
+										Timestamp:   0,
+										SampleValue: 2,
 										Labels: cortexpb.FromLabelsToLabelAdapters(labels.FromMap(map[string]string{
 											"__name__": "up",
 											"job":      "bar",
