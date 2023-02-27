@@ -630,6 +630,20 @@ func TestDownsampleAggrAndNonEmptyXORChunks(t *testing.T) {
 
 }
 
+type histogramH struct {
+	count   float64
+	sum     float64
+	buckets []bucket
+}
+
+type bucket struct {
+	upperBound          float64
+	lowerBound          float64
+	count               int64
+	lowerboundInclusive bool
+	upperboundInclusive bool
+}
+
 func TestDownSampleNativeHistogram(t *testing.T) {
 	logger := log.NewLogfmtLogger(os.Stderr)
 	dir := t.TempDir()
@@ -671,6 +685,31 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	}{
 		{
 			count: []sample{{t: 399, v: 1}, {t: 799, v: 2}, {t: 800, v: 1}},
+			counter: []sample{
+				{
+					t: 399, fh: &histogram.FloatHistogram{
+						CounterResetHint: histogram.UnknownCounterReset,
+						Count:            10,
+						Sum:              18.4,
+					},
+				},
+				{
+					t: 799, fh: &histogram.FloatHistogram{
+						CounterResetHint: histogram.UnknownCounterReset,
+
+						Count: 26,
+						Sum:   55.2,
+					},
+				},
+				{
+					t: 800, fh: &histogram.FloatHistogram{
+						CounterResetHint: histogram.UnknownCounterReset,
+
+						Count: 34,
+						Sum:   73.6,
+					},
+				},
+			},
 		},
 	}
 
@@ -679,8 +718,10 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	defer func() { testutil.Ok(t, chunkr.Close()) }()
 
 	for i, c := range chks {
-		count := getAggregatorFromChunk(t, chunkr, c)
+		count, _, counter := getAggregatorFromChunk(t, chunkr, c)
 		testutil.Equals(t, expected[i].count, count)
+
+		compareHistograms(t, expected[i].counter, counter)
 	}
 
 	blk, err := tsdb.OpenBlock(logger, filepath.Join(dir, id.String()), NewPool())
@@ -692,15 +733,23 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	testutil.Ok(t, err)
 }
 
-func getAggregatorFromChunk(t *testing.T, chunkr *chunks.Reader, c chunks.Meta) []sample {
+func compareHistograms(t *testing.T, expected []sample, got []sample) {
+	testutil.Equals(t, len(expected), len(got), "expected %d samples, got %d", len(expected), len(got))
+	for i, e := range expected {
+		testutil.Equals(t, e.t, got[i].t, "expected sample at %d to have timestamp %d, got %d", i, e.t, got[i].t)
+		testutil.Assert(t, math.Abs(e.fh.Count-got[i].fh.Count) < 0.00001, "expected sample at %d to have count %d, got %d", i, e.fh.Count, got[i].fh.Count)
+		testutil.Assert(t, math.Abs(e.fh.Sum-got[i].fh.Sum) < 0.00001, "expected sample at %d to have sum %f, got %f", i, e.fh.Sum, got[i].fh.Sum)
+	}
+}
+
+func getAggregatorFromChunk(t *testing.T, chunkr *chunks.Reader, c chunks.Meta) (count []sample, sum []sample, counter []sample) {
 	chk, err := chunkr.Chunk(c)
 	testutil.Ok(t, err)
 
 	ag, ok := chk.(*AggrChunk)
 	testutil.Assert(t, ok)
 
-	count, _, _ := expandHistogramAggregatorChunk(t, ag)
-	return count
+	return expandHistogramAggregatorChunk(t, ag)
 }
 
 func getMetaAndChunks(t *testing.T, dir string, id ulid.ULID) (*metadata.Meta, []chunks.Meta) {
@@ -733,10 +782,9 @@ func getMetaAndChunks(t *testing.T, dir string, id ulid.ULID) (*metadata.Meta, [
 	return newMeta, chks
 }
 
-func expandHistogramAggregatorChunk(t *testing.T, c *AggrChunk) ([]sample, []sample, []sample) {
+func expandHistogramAggregatorChunk(t *testing.T, c *AggrChunk) (count []sample, sum []sample, counter []sample) {
 	countChunk, err := c.Get(AggrCount)
 	testutil.Ok(t, err, "get histogram aggregator count chunk")
-	var count []sample
 	it := countChunk.Iterator(nil)
 	for it.Next() != chunkenc.ValNone {
 		t, v := it.At()
@@ -746,7 +794,6 @@ func expandHistogramAggregatorChunk(t *testing.T, c *AggrChunk) ([]sample, []sam
 
 	sumChunk, err := c.Get(AggrSum)
 	testutil.Ok(t, err, "get histogram aggregator sum chunk")
-	var sum []sample
 	it = sumChunk.Iterator(nil)
 	for it.Next() != chunkenc.ValNone {
 		t, fh := it.AtFloatHistogram()
@@ -756,7 +803,6 @@ func expandHistogramAggregatorChunk(t *testing.T, c *AggrChunk) ([]sample, []sam
 
 	counterChunk, err := c.Get(AggrCounter)
 	testutil.Ok(t, err, "get histogram aggregator counter chunk")
-	var counter []sample
 	it = counterChunk.Iterator(nil)
 	for it.Next() != chunkenc.ValNone {
 		t, fh := it.AtFloatHistogram()
