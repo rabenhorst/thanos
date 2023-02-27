@@ -155,17 +155,10 @@ func Downsample(
 		// Raw and already downsampled data need different processing.
 		if origMeta.Thanos.Downsample.Resolution == 0 {
 			for _, c := range chks {
-				if isHistogram(c.Chunk) {
-					if err := expandHistogramChunkIterator(c.Chunk.Iterator(reuseIt), &allH); err != nil {
-						return id, errors.Wrapf(err, "expand histogram chunk %d, series %d", c.Ref, postings.At())
-					}
-					continue
-				}
-
 				// TODO(bwplotka): We can optimze this further by using in WriteSeries iterators of each chunk instead of
 				// samples. Also ensure 120 sample limit, otherwise we have gigantic chunks.
 				// https://github.com/thanos-io/thanos/issues/2542.
-				if err := expandChunkIterator(c.Chunk.Iterator(reuseIt), &all); err != nil {
+				if err := expandChunkIterator(reuseIt, c.Chunk, &allH, &all); err != nil {
 					return id, errors.Wrapf(err, "expand chunk %d, series %d", c.Ref, postings.At())
 				}
 			}
@@ -254,6 +247,19 @@ func isHistogram(c chunkenc.Chunk) bool {
 	}
 
 	return slices.Contains(histEncs, c.Encoding())
+}
+
+func expandChunkIterator(reuseIt chunkenc.Iterator, chk chunkenc.Chunk, bufHist *[]sample, bufXor *[]sample) error {
+	switch chk.Encoding() {
+	case chunkenc.EncXOR:
+		return expandXorChunkIterator(chk.Iterator(reuseIt), bufXor)
+	case chunkenc.EncFloatHistogram:
+		return expandFloatHistogramChunkIterator(chk.Iterator(reuseIt), bufHist)
+	case chunkenc.EncHistogram:
+		return expandHistogramChunkIterator(chk.Iterator(reuseIt), bufHist)
+	default:
+		return errors.Errorf("unexpected chunk encoding %s", chk.Encoding())
+	}
 }
 
 // expandHistogramChunkIterator reads all histograms from the iterator and appends them to buf.
@@ -672,9 +678,9 @@ func downsampleAggrLoop(chks []*AggrChunk, buf *[]sample, resolution int64, numC
 	return res, nil
 }
 
-// expandChunkIterator reads all samples from the iterator and appends them to buf.
+// expandXorChunkIterator reads all samples from the iterator and appends them to buf.
 // Stale markers and out of order samples are skipped.
-func expandChunkIterator(it chunkenc.Iterator, buf *[]sample) error {
+func expandXorChunkIterator(it chunkenc.Iterator, buf *[]sample) error {
 	// For safety reasons, we check for each sample that it does not go back in time.
 	// If it does, we skip it.
 	lastT := int64(0)
@@ -713,7 +719,7 @@ func genericAggregate(
 		} else if err != nil {
 			return err
 		}
-		if err := expandChunkIterator(c.Iterator(reuseIt), buf); err != nil {
+		if err := expandXorChunkIterator(c.Iterator(reuseIt), buf); err != nil {
 			return err
 		}
 	}
@@ -782,7 +788,7 @@ func downsampleAggrBatch(chks []*AggrChunk, buf *[]sample, resolution int64) (ch
 	*buf = (*buf)[:0]
 	it := NewApplyCounterResetsIterator(acs...)
 
-	if err := expandChunkIterator(it, buf); err != nil {
+	if err := expandXorChunkIterator(it, buf); err != nil {
 		return chk, err
 	}
 	if len(*buf) == 0 {
