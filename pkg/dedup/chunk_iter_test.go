@@ -168,7 +168,7 @@ func TestDedupChunkSeriesMergerDownsampledChunks(t *testing.T) {
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(emptySamples, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(emptySamples, downsample.ResLevel1, false)...)
 					},
 				},
 			},
@@ -185,14 +185,14 @@ func TestDedupChunkSeriesMergerDownsampledChunks(t *testing.T) {
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1, false)...)
 					},
 				},
 			},
 			expected: &storage.ChunkSeriesEntry{
 				Lset: defaultLabels,
 				ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-					return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1)...)
+					return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1, false)...)
 				},
 			},
 		},
@@ -202,13 +202,13 @@ func TestDedupChunkSeriesMergerDownsampledChunks(t *testing.T) {
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(emptySamples, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(emptySamples, downsample.ResLevel1, false)...)
 					},
 				},
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(emptySamples, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(emptySamples, downsample.ResLevel1, false)...)
 					},
 				},
 			},
@@ -225,13 +225,13 @@ func TestDedupChunkSeriesMergerDownsampledChunks(t *testing.T) {
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1, false)...)
 					},
 				},
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples2, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples2, downsample.ResLevel1, false)...)
 					},
 				},
 			},
@@ -239,8 +239,8 @@ func TestDedupChunkSeriesMergerDownsampledChunks(t *testing.T) {
 				Lset: defaultLabels,
 				ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
 					return storage.NewListChunkSeriesIterator(
-						append(downsample.DownsampleRaw(samples1, downsample.ResLevel1),
-							downsample.DownsampleRaw(samples2, downsample.ResLevel1)...)...)
+						append(downsample.DownsampleRaw(samples1, downsample.ResLevel1, false),
+							downsample.DownsampleRaw(samples2, downsample.ResLevel1, false)...)...)
 				},
 			},
 		},
@@ -251,13 +251,13 @@ func TestDedupChunkSeriesMergerDownsampledChunks(t *testing.T) {
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1, false)...)
 					},
 				},
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1, false)...)
 					},
 				},
 			},
@@ -265,7 +265,7 @@ func TestDedupChunkSeriesMergerDownsampledChunks(t *testing.T) {
 				Lset: defaultLabels,
 				ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
 					return storage.NewListChunkSeriesIterator(
-						downsample.DownsampleRaw(samples1, downsample.ResLevel1)...)
+						downsample.DownsampleRaw(samples1, downsample.ResLevel1, false)...)
 				},
 			},
 		},
@@ -275,13 +275,13 @@ func TestDedupChunkSeriesMergerDownsampledChunks(t *testing.T) {
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples1, downsample.ResLevel1, false)...)
 					},
 				},
 				&storage.ChunkSeriesEntry{
 					Lset: defaultLabels,
 					ChunkIteratorFn: func(chunks.Iterator) chunks.Iterator {
-						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples3, downsample.ResLevel1)...)
+						return storage.NewListChunkSeriesIterator(downsample.DownsampleRaw(samples3, downsample.ResLevel1, false)...)
 					},
 				},
 			},
