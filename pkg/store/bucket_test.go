@@ -2339,7 +2339,7 @@ func BenchmarkBucketBlock_readChunkRange(b *testing.B) {
 }
 
 func BenchmarkBlockSeries(b *testing.B) {
-	blk, blockMeta := prepareBucket(b, compact.ResolutionLevelRaw)
+	blk, blockMeta := prepareBucket(b, compact.ResolutionLevelRaw, chunkenc.ValFloat)
 
 	aggrs := []storepb.Aggr{storepb.Aggr_RAW}
 	for _, concurrency := range []int{1, 2, 4, 8, 16, 32} {
@@ -2349,7 +2349,7 @@ func BenchmarkBlockSeries(b *testing.B) {
 	}
 }
 
-func prepareBucket(b *testing.B, resolutionLevel compact.ResolutionLevel) (*bucketBlock, *metadata.Meta) {
+func prepareBucket(b *testing.B, resolutionLevel compact.ResolutionLevel, sampleType chunkenc.ValueType) (*bucketBlock, *metadata.Meta) {
 	var (
 		ctx    = context.Background()
 		logger = log.NewNopLogger()
@@ -2372,6 +2372,7 @@ func prepareBucket(b *testing.B, resolutionLevel compact.ResolutionLevel) (*buck
 		PrependLabels:    nil,
 		Random:           rand.New(rand.NewSource(120)),
 		SkipChunks:       true,
+		SampleType:       sampleType,
 	})
 	blockID := createBlockFromHead(b, tmpDir, head)
 
@@ -2482,7 +2483,7 @@ func benchmarkBlockSeriesWithConcurrency(b *testing.B, concurrency int, blockMet
 }
 
 func BenchmarkDownsampledBlockSeries(b *testing.B) {
-	blk, blockMeta := prepareBucket(b, compact.ResolutionLevel5m)
+	blk, blockMeta := prepareBucket(b, compact.ResolutionLevel5m, chunkenc.ValFloat)
 	aggrs := []storepb.Aggr{}
 	for i := 1; i < int(storepb.Aggr_COUNTER); i++ {
 		aggrs = append(aggrs, storepb.Aggr(i))
@@ -2491,5 +2492,17 @@ func BenchmarkDownsampledBlockSeries(b *testing.B) {
 				benchmarkBlockSeriesWithConcurrency(b, concurrency, blockMeta, blk, aggrs)
 			})
 		}
+	}
+}
+
+func BenchmarkDownsampledBlockSeries_NativeHistogram(b *testing.B) {
+	blk, blockMeta := prepareBucket(b, compact.ResolutionLevel5m, chunkenc.ValHistogram)
+	aggrs := []storepb.Aggr{}
+
+	aggrsTypes := []storepb.Aggr{storepb.Aggr_COUNT, storepb.Aggr_COUNTER, storepb.Aggr_SUM}
+	for _, concurrency := range []int{1, 2, 4, 8, 16, 32} {
+		b.Run(fmt.Sprintf("aggregates: %v, concurrency: %d", aggrs, concurrency), func(b *testing.B) {
+			benchmarkBlockSeriesWithConcurrency(b, concurrency, blockMeta, blk, aggrsTypes)
+		})
 	}
 }
