@@ -133,7 +133,9 @@ func TestDownsampleCounterBoundaryReset(t *testing.T) {
 	doTest := func(t *testing.T, test *test) {
 		// Asking for more chunks than raw samples ensures that downsampleRawLoop
 		// will create chunks with samples from a single window.
-		cm := downsampleRawLoop(test.raw, test.rawAggrResolution, len(test.raw)+1, false)
+		numChunks := len(test.raw) + 1
+		cm := make([]chunks.Meta, 0, numChunks)
+		downsampleRawLoop(test.raw, test.rawAggrResolution, numChunks, false, &cm)
 		testutil.Equals(t, test.expectedRawAggrChunks, len(cm))
 
 		rawAggrChunks := toAggrChunks(t, cm)
@@ -621,7 +623,7 @@ func TestDownsampleAggrAndNonEmptyXORChunks(t *testing.T) {
 			testutil.Ok(t, err)
 
 			buf := m[at]
-			testutil.Ok(t, expandChunkIterator(c.Iterator(nil), &buf))
+			testutil.Ok(t, expandXorChunkIterator(c.Iterator(nil), &buf))
 			m[at] = buf
 		}
 		got = append(got, m)

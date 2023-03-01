@@ -114,18 +114,17 @@ func Downsample(
 	var (
 		aggrChunks      []*AggrChunk
 		aggrHistoChunks []*AggrChunk
-		all             []sample
-		allH            []sample
 		chks            []chunks.Meta
-		writeChks       []chunks.Meta
 		builder         labels.ScratchBuilder
 		reuseIt         chunkenc.Iterator
 	)
+
+	rawSamples := newSamples()
+	all := rawSamples.floatSamples
+
 	for postings.Next() {
 		chks = chks[:0]
-		writeChks = writeChks[:0]
-		all = all[:0]
-		allH = allH[:0]
+		rawSamples.reset()
 		aggrChunks = aggrChunks[:0]
 		aggrHistoChunks = aggrHistoChunks[:0]
 
@@ -158,13 +157,11 @@ func Downsample(
 				// TODO(bwplotka): We can optimze this further by using in WriteSeries iterators of each chunk instead of
 				// samples. Also ensure 120 sample limit, otherwise we have gigantic chunks.
 				// https://github.com/thanos-io/thanos/issues/2542.
-				if err := expandChunkIterator(reuseIt, c.Chunk, &allH, &all); err != nil {
+				if err := expandChunkIterator(reuseIt, c.Chunk, rawSamples); err != nil {
 					return id, errors.Wrapf(err, "expand chunk %d, series %d", c.Ref, postings.At())
 				}
 			}
-			writeChks = append(writeChks, DownsampleRaw(all, resolution, false)...)
-			writeChks = append(writeChks, DownsampleRaw(allH, resolution, true)...)
-			if err := streamedBlockWriter.WriteSeries(lset, writeChks); err != nil {
+			if err := streamedBlockWriter.WriteSeries(lset, DownsampleRaw(rawSamples, resolution)); err != nil {
 				return id, errors.Wrapf(err, "downsample raw histogram data, series: %d", postings.At())
 			}
 		} else {
@@ -179,10 +176,10 @@ func Downsample(
 						level.Warn(logger).Log("msg", fmt.Sprintf("expected downsampled chunk (*downsample.AggrChunk) got an empty %T instead for series: %d", c.Chunk, postings.At()))
 						continue
 					} else {
-						if err := expandChunkIterator(c.Chunk.Iterator(reuseIt), &all); err != nil {
+						if err := expandChunkIterator(c.Chunk.Iterator(reuseIt), c.Chunk, rawSamples); err != nil {
 							return id, errors.Wrapf(err, "expand chunk %d, series %d", c.Ref, postings.At())
 						}
-						aggrDataChunks := DownsampleRaw(all, ResLevel1, false)
+						aggrDataChunks := DownsampleRaw(rawSamples, ResLevel1)
 						for _, cn := range aggrDataChunks {
 							ac, ok = cn.Chunk.(*AggrChunk)
 							if !ok {
@@ -209,9 +206,10 @@ func Downsample(
 				resolution,
 				false,
 			)
+			all = all[:0]
 			downsampledHistoChunks, err := downsampleAggr(
 				aggrHistoChunks,
-				&allH,
+				&all,
 				chks[0].MinTime,
 				chks[len(chks)-1].MaxTime,
 				origMeta.Thanos.Downsample.Resolution,
@@ -249,47 +247,17 @@ func isHistogram(c chunkenc.Chunk) bool {
 	return slices.Contains(histEncs, c.Encoding())
 }
 
-func expandChunkIterator(reuseIt chunkenc.Iterator, chk chunkenc.Chunk, bufHist *[]sample, bufXor *[]sample) error {
+func expandChunkIterator(reuseIt chunkenc.Iterator, chk chunkenc.Chunk, s *samples) error {
 	switch chk.Encoding() {
 	case chunkenc.EncXOR:
-		return expandXorChunkIterator(chk.Iterator(reuseIt), bufXor)
+		return expandXorChunkIterator(chk.Iterator(reuseIt), &s.floatSamples)
 	case chunkenc.EncFloatHistogram:
-		return expandFloatHistogramChunkIterator(chk.Iterator(reuseIt), bufHist)
+		return expandFloatHistogramChunkIterator(chk.Iterator(reuseIt), &s.floatHistogramSamples)
 	case chunkenc.EncHistogram:
-		return expandHistogramChunkIterator(chk.Iterator(reuseIt), bufHist)
+		return expandHistogramChunkIterator(chk.Iterator(reuseIt), &s.floatHistogramSamples)
 	default:
 		return errors.Errorf("unexpected chunk encoding %s", chk.Encoding())
 	}
-}
-
-// expandHistogramChunkIterator reads all histograms from the iterator and appends them to buf.
-func expandHistogramChunkIterator(it chunkenc.Iterator, buf *[]sample) error {
-	// For safety reasons, we check for each sample that it does not go back in time.
-	// If it does, we skip it.
-	lastT := int64(0)
-
-	for it.Next() != chunkenc.ValNone {
-		t, h := it.AtHistogram()
-		if t >= lastT {
-			*buf = append(*buf, sample{t: t, fh: h.ToFloat()})
-		}
-	}
-	return it.Err()
-}
-
-// expandHistogramChunkIterator reads all histograms from the iterator and appends them to buf.
-func expandFloatHistogramChunkIterator(it chunkenc.Iterator, buf *[]sample) error {
-	// For safety reasons, we check for each sample that it does not go back in time.
-	// If it does, we skip it.
-	lastT := int64(0)
-
-	for it.Next() != chunkenc.ValNone {
-		t, h := it.AtFloatHistogram()
-		if t >= lastT {
-			*buf = append(*buf, sample{t: t, fh: h})
-		}
-	}
-	return it.Err()
 }
 
 // currentWindow returns the end timestamp of the window that t falls into.
@@ -531,21 +499,38 @@ func mustGetHistogramAggregator(aggr sampleAggregator) *histogramAggregator {
 }
 
 // DownsampleRaw create a series of aggregation chunks for the given sample data.
-func DownsampleRaw(data []sample, resolution int64, isHistogramSamples bool) []chunks.Meta {
-	if len(data) == 0 {
+func DownsampleRaw(data *samples, resolution int64) []chunks.Meta {
+	if data.isEmpty() {
 		return nil
 	}
 
-	mint, maxt := data[0].t, data[len(data)-1].t
-	// We assume a raw resolution of 1 minute. In practice it will often be lower
-	// but this is sufficient for our heuristic to produce well-sized chunks.
-	numChunks := targetChunkCount(mint, maxt, 1*60*1000, resolution, len(data))
-	return downsampleRawLoop(data, resolution, numChunks, isHistogramSamples)
+	floatSamples, ok := data.getF()
+	var numFChunks int
+	if ok {
+		mint, maxt := minMaxT(floatSamples)
+		numFChunks = targetChunkCount(mint, maxt, 1*60*1000, resolution, len(floatSamples))
+	}
+
+	histogramSamples, ok := data.getH()
+	var numHChunks int
+	if ok {
+		mint, maxt := minMaxT(histogramSamples)
+		numHChunks = targetChunkCount(mint, maxt, 1*60*1000, resolution, len(histogramSamples))
+	}
+
+	chks := make([]chunks.Meta, 0, numFChunks+numHChunks)
+
+	downsampleRawLoop(floatSamples, resolution, numFChunks, false, &chks)
+	downsampleRawLoop(histogramSamples, resolution, numHChunks, true, &chks)
+
+	return chks
 }
 
-func downsampleRawLoop(data []sample, resolution int64, numChunks int, isHistogramSamples bool) []chunks.Meta {
+func downsampleRawLoop(data []sample, resolution int64, numChunks int, isHistogramSamples bool, chks *[]chunks.Meta) {
+	if len(data) == 0 {
+		return
+	}
 	batchSize := (len(data) / numChunks) + 1
-	chks := make([]chunks.Meta, 0, numChunks)
 
 	for len(data) > 0 {
 		j := batchSize
@@ -580,10 +565,8 @@ func downsampleRawLoop(data []sample, resolution int64, numChunks int, isHistogr
 			downsampleBatch(batch, resolution, ab.addHistogram, isHistogramSamples)
 		}
 
-		chks = append(chks, ab.encode())
+		*chks = append(*chks, ab.encode())
 	}
-
-	return chks
 }
 
 // downsampleBatch aggregates the data over the given resolution and calls add each time
@@ -693,6 +676,36 @@ func expandXorChunkIterator(it chunkenc.Iterator, buf *[]sample) error {
 		if t >= lastT {
 			*buf = append(*buf, sample{t: t, v: v})
 			lastT = t
+		}
+	}
+	return it.Err()
+}
+
+// expandHistogramChunkIterator reads all histograms from the iterator and appends them to buf.
+func expandHistogramChunkIterator(it chunkenc.Iterator, buf *[]sample) error {
+	// For safety reasons, we check for each sample that it does not go back in time.
+	// If it does, we skip it.
+	lastT := int64(0)
+
+	for it.Next() != chunkenc.ValNone {
+		t, h := it.AtHistogram()
+		if t >= lastT {
+			*buf = append(*buf, sample{t: t, fh: h.ToFloat()})
+		}
+	}
+	return it.Err()
+}
+
+// expandHistogramChunkIterator reads all histograms from the iterator and appends them to buf.
+func expandFloatHistogramChunkIterator(it chunkenc.Iterator, buf *[]sample) error {
+	// For safety reasons, we check for each sample that it does not go back in time.
+	// If it does, we skip it.
+	lastT := int64(0)
+
+	for it.Next() != chunkenc.ValNone {
+		t, fh := it.AtFloatHistogram()
+		if t >= lastT {
+			*buf = append(*buf, sample{t: t, fh: fh})
 		}
 	}
 	return it.Err()
@@ -902,6 +915,56 @@ type sample struct {
 	t  int64
 	v  float64
 	fh *histogram.FloatHistogram
+}
+
+type samples struct {
+	floatSamples          []sample
+	floatHistogramSamples []sample
+}
+
+func newSamples() *samples {
+	return &samples{}
+}
+
+func (s *samples) reset() {
+	s.floatSamples = s.floatSamples[:0]
+	s.floatHistogramSamples = s.floatHistogramSamples[:0]
+}
+
+func (s *samples) isEmpty() bool {
+	return len(s.floatSamples) == 0 && len(s.floatHistogramSamples) == 0
+}
+
+func (s *samples) getF() ([]sample, bool) {
+	if len(s.floatSamples) == 0 {
+		return nil, false
+	}
+	return s.floatSamples, true
+}
+
+func (s *samples) getH() ([]sample, bool) {
+	if len(s.floatHistogramSamples) == 0 {
+		return nil, false
+	}
+	return s.floatHistogramSamples, true
+}
+
+func minMaxT(s []sample) (int64, int64) {
+	return s[0].t, s[len(s)-1].t
+
+}
+
+func (s *samples) addChunk(reuseIt chunkenc.Iterator, chk chunkenc.Chunk) error {
+	switch chk.Encoding() {
+	case chunkenc.EncXOR:
+		return expandXorChunkIterator(chk.Iterator(reuseIt), &s.floatSamples)
+	case chunkenc.EncFloatHistogram:
+		return expandFloatHistogramChunkIterator(chk.Iterator(reuseIt), &s.floatHistogramSamples)
+	case chunkenc.EncHistogram:
+		return expandHistogramChunkIterator(chk.Iterator(reuseIt), &s.floatHistogramSamples)
+	default:
+		return errors.Errorf("unexpected chunk encoding %s", chk.Encoding())
+	}
 }
 
 // ApplyCounterResetsSeriesIterator generates monotonically increasing values by iterating
