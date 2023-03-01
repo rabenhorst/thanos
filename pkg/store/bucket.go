@@ -1092,7 +1092,8 @@ func populateChunk(out *storepb.AggrChunk, in chunkenc.Chunk, aggrs []storepb.Ag
 			if err != nil {
 				return err
 			}
-			out.Sum = &storepb.Chunk{Type: storepb.Chunk_Encoding(in.Encoding() - 1), Data: b, Hash: hashChunk(hasher, b, calculateChecksum)}
+
+			out.Sum = &storepb.Chunk{Type: getUnderlyingChunkType(in), Data: b, Hash: hashChunk(hasher, b, calculateChecksum)}
 		case storepb.Aggr_MIN:
 			x, err := ac.Get(downsample.AggrMin)
 			if err != nil {
@@ -1122,10 +1123,18 @@ func populateChunk(out *storepb.AggrChunk, in chunkenc.Chunk, aggrs []storepb.Ag
 			if err != nil {
 				return err
 			}
-			out.Counter = &storepb.Chunk{Type: storepb.Chunk_Encoding(in.Encoding() - 1), Data: b, Hash: hashChunk(hasher, b, calculateChecksum)}
+			out.Counter = &storepb.Chunk{Type: getUnderlyingChunkType(x), Data: b, Hash: hashChunk(hasher, b, calculateChecksum)}
 		}
 	}
 	return nil
+}
+
+func getUnderlyingChunkType(in chunkenc.Chunk) storepb.Chunk_Encoding {
+	chkType := storepb.Chunk_XOR
+	if downsample.IsHistogram(in) {
+		chkType = storepb.Chunk_HISTOGRAM
+	}
+	return chkType
 }
 
 func hashChunk(hasher hash.Hash64, b []byte, doHash bool) uint64 {

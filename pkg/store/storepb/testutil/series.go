@@ -21,7 +21,6 @@ import (
 	"github.com/cespare/xxhash"
 	"github.com/efficientgo/core/testutil"
 	"github.com/gogo/protobuf/types"
-	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb"
@@ -196,18 +195,21 @@ func appendFloatSamples(t testing.TB, app storage.Appender, tsLabel int, opts He
 }
 
 func appendHistogramSamples(t testing.TB, app storage.Appender, tsLabel int, opts HeadGenOptions) {
-	sample := &histogram.Histogram{
-		Schema:        0,
-		Count:         9,
-		Sum:           -3.1415,
-		ZeroCount:     12,
-		ZeroThreshold: 0.001,
-		NegativeSpans: []histogram.Span{
-			{Offset: 0, Length: 4},
-			{Offset: 1, Length: 1},
-		},
-		NegativeBuckets: []int64{1, 2, -2, 1, -1},
-	}
+	//sample := &histogram.Histogram{
+	//	Schema:        1.0,
+	//	Count:         9,
+	//	Sum:           -3.1415,
+	//	ZeroCount:     12,
+	//	ZeroThreshold: 0.001,
+	//	NegativeSpans: []histogram.Span{
+	//		{Offset: 0, Length: 4},
+	//		{Offset: 1, Length: 1},
+	//	},
+	//	NegativeBuckets: []int64{1, 2, -2, 1, -1},
+	//}
+	samples := tsdb.GenerateTestHistograms(1)
+	sample := samples[0]
+	sample.Count = 10
 
 	ref, err := app.AppendHistogram(
 		0,

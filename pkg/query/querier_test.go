@@ -8,13 +8,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	storecache "github.com/thanos-io/thanos/pkg/store/cache"
+
+	thanosmodel "github.com/thanos-io/thanos/pkg/model"
+
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/thanos-io/objstore"
+
+	"github.com/thanos-io/thanos/pkg/compact"
+
+	"github.com/thanos-io/thanos/pkg/block"
+	"github.com/thanos-io/thanos/pkg/compact/downsample"
+
+	"github.com/thanos-io/thanos/pkg/block/metadata"
 
 	"github.com/efficientgo/core/testutil"
 	"github.com/go-kit/log"
@@ -828,6 +845,188 @@ func TestQuerier_Select(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
+	// create the in fs store
+	// upload blk to bucket
+	meta, bkt := createBucketWithData(t, chunkenc.ValHistogram, compact.ResolutionLevel5m)
+	defer func() {
+		testutil.Ok(t, bkt.Close())
+	}()
+	// crate BucketStore from bucket
+	bucketStore := prepareStoreFromBucket(t, meta, bkt)
+	// create a proxy to wrap the BucketStore
+	testBucketStore := newProxyStore(bucketStore)
+
+	// create a querier to wrap the proxy
+	timeout := 2 * time.Minute
+	testQueryable := NewQueryableCreator(
+		nil,
+		nil,
+		newProxyStore(testBucketStore),
+		2,
+		timeout,
+	)(false,
+		nil,
+		nil,
+		9999999,
+		false,
+		false,
+		false,
+		nil,
+		NoopSeriesStatsReporter,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	engine := promql.NewEngine(
+		promql.EngineOpts{
+			MaxSamples: math.MaxInt32,
+			Timeout:    timeout,
+		},
+	)
+
+	//minTs := time.UnixMilli(meta.MinTime)
+	maxTs := time.UnixMilli(meta.MaxTime)
+
+	qry, err := engine.NewInstantQuery(
+		testQueryable,
+		&promql.QueryOpts{},
+		"histogram_count(test_metric{})",
+		maxTs,
+	)
+
+	testutil.Ok(t, err)
+	res := qry.Exec(ctx)
+	testutil.Ok(t, res.Err)
+	testutil.Assert(t, len(res.Warnings) == 0, "expected no warnings")
+
+	fmt.Printf("results: %v\n", res)
+	matrix, err := res.Matrix()
+	if err == nil {
+		fmt.Printf("matrix: %v\n", matrix)
+		for _, s := range matrix {
+			fmt.Printf("series: %v\n", s)
+			for _, p := range s.Points {
+				fmt.Printf("point: %v\n", p)
+			}
+		}
+	}
+
+	vector, err := res.Vector()
+	if err == nil {
+		fmt.Printf("vector: %v\n", vector)
+	}
+
+	scalar, err := res.Scalar()
+	if err == nil {
+		fmt.Printf("scalar: %v\n", scalar)
+	}
+}
+
+func prepareStoreFromBucket(t testing.TB, meta *metadata.Meta, bkt objstore.Bucket) *store.BucketStore {
+	minTs := time.UnixMilli(meta.MinTime).Add(-time.Second)
+	minTime := thanosmodel.TimeOrDurationValue{Time: &minTs}
+	maxTs := time.UnixMilli(meta.MaxTime).Add(time.Second)
+	maxTime := thanosmodel.TimeOrDurationValue{Time: &maxTs}
+
+	allowAllFilterConf := &store.FilterConfig{
+		MinTime: minTime,
+		MaxTime: maxTime,
+	}
+
+	logger := log.NewLogfmtLogger(os.Stdout)
+
+	dir := t.TempDir()
+
+	metaFetcher, err := block.NewMetaFetcher(logger, 20, objstore.WithNoopInstr(bkt), dir, nil, []block.MetadataFilter{
+		block.NewTimePartitionMetaFilter(minTime, maxTime),
+	})
+	testutil.Ok(t, err)
+
+	indexCache, err := storecache.NewInMemoryIndexCacheWithConfig(logger, nil, storecache.DefaultInMemoryIndexCacheConfig)
+	testutil.Ok(t, err)
+
+	// create the bucket store
+	reg := prometheus.NewRegistry()
+	fsStore, err := store.NewBucketStore(
+		objstore.WithNoopInstr(bkt),
+		metaFetcher,
+		dir,
+		store.NewChunksLimiterFactory(0),
+		store.NewSeriesLimiterFactory(0),
+		store.NewBytesLimiterFactory(0),
+		store.NewGapBasedPartitioner(store.PartitionerMaxGapSize),
+		20,
+		true,
+		store.DefaultPostingOffsetInMemorySampling,
+		true,
+		false,
+		time.Minute,
+		store.WithLogger(logger),
+		store.WithIndexCache(indexCache),
+		store.WithFilterConfig(allowAllFilterConf),
+		store.WithRegistry(reg),
+	)
+	testutil.Ok(t, err)
+
+	err = fsStore.InitialSync(context.Background())
+	testutil.Ok(t, err)
+
+	return fsStore
+}
+
+func createBucketWithData(b testing.TB, sampleType chunkenc.ValueType, resolutionLevel compact.ResolutionLevel) (*metadata.Meta, objstore.Bucket) {
+	var (
+		logger = log.NewNopLogger()
+	)
+
+	tmpDir := b.TempDir()
+
+	bkt := objstore.NewInMemBucket()
+	b.Cleanup(func() {
+		testutil.Ok(b, bkt.Close())
+	})
+
+	// Create a block.
+	head, _ := storetestutil.CreateHeadWithSeries(b, 0, storetestutil.HeadGenOptions{
+		TSDBDir:          filepath.Join(tmpDir, "head"),
+		SamplesPerSeries: 86400 / 15, // Simulate 1 day block with 15s scrape interval.
+		ScrapeInterval:   15 * time.Second,
+		Series:           10,
+		PrependLabels:    nil,
+		Random:           rand.New(rand.NewSource(120)),
+		SkipChunks:       true,
+		SampleType:       sampleType,
+	})
+	blockID := storetestutil.CreateBlockFromHead(b, tmpDir, head)
+
+	// Upload the block to the bucket.
+	thanosMeta := metadata.Thanos{
+		Labels:     labels.Labels{{Name: "ext1", Value: "1"}}.Map(),
+		Downsample: metadata.ThanosDownsample{Resolution: 0},
+		Source:     metadata.TestSource,
+	}
+
+	blockMeta, err := metadata.InjectThanos(logger, filepath.Join(tmpDir, blockID.String()), thanosMeta, nil)
+	testutil.Ok(b, err)
+
+	testutil.Ok(b, block.Upload(context.Background(), logger, bkt, filepath.Join(tmpDir, blockID.String()), metadata.NoneFunc))
+
+	if resolutionLevel > 0 {
+		// Downsample newly-created block.
+		blockID, err = downsample.Downsample(logger, blockMeta, head, tmpDir, int64(resolutionLevel))
+		testutil.Ok(b, err)
+		blockMeta, err = metadata.ReadFromDir(filepath.Join(tmpDir, blockID.String()))
+		testutil.Ok(b, err)
+
+		testutil.Ok(b, block.Upload(context.Background(), logger, bkt, filepath.Join(tmpDir, blockID.String()), metadata.NoneFunc))
+	}
+	testutil.Ok(b, head.Close())
+
+	return blockMeta, bkt
 }
 
 func newProxyStore(storeAPIs ...storepb.StoreServer) *store.ProxyStore {

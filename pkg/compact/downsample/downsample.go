@@ -190,7 +190,7 @@ func Downsample(
 
 				}
 
-				if isHistogram(ac) {
+				if IsHistogram(ac) {
 					aggrHistoChunks = append(aggrHistoChunks, ac)
 				} else {
 					aggrChunks = append(aggrChunks, ac)
@@ -233,7 +233,7 @@ func Downsample(
 	return
 }
 
-func isHistogram(c chunkenc.Chunk) bool {
+func IsHistogram(c chunkenc.Chunk) bool {
 	histEncs := []chunkenc.Encoding{chunkenc.EncHistogram, chunkenc.EncFloatHistogram}
 	if c.Encoding() == ChunkEncAggr {
 		ch := c.(*AggrChunk)
