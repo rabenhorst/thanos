@@ -10,6 +10,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/pkg/errors"
@@ -313,4 +314,16 @@ func (s *TSDBStore) LabelValues(ctx context.Context, r *storepb.LabelValuesReque
 	}
 
 	return &storepb.LabelValuesResponse{Values: res}, nil
+}
+
+// GuaranteedMinTime returns the minimum timestamp in milliseconds that will always be present in a TSDB.
+func GuaranteedMinTime(now, mint, retentionDuration, minBlockDuration int64) int64 {
+	if mint == UninitializedTSDBTime {
+		return UninitializedTSDBTime
+	}
+
+	estimatedRetentionTime := time.UnixMilli(now - retentionDuration)
+	estimatedRetentionTime = estimatedRetentionTime.Truncate(time.Duration(minBlockDuration) * time.Millisecond)
+
+	return estimatedRetentionTime.UnixMilli()
 }
