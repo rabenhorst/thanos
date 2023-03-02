@@ -878,6 +878,8 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		NoopSeriesStatsReporter,
 	)
 
+	_, maxTs := bucketStore.TimeRange()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -888,14 +890,19 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		},
 	)
 
-	//minTs := time.UnixMilli(meta.MinTime)
-	maxTs := time.UnixMilli(meta.MaxTime)
+	startTime := time.UnixMilli(maxTs).Add(-12 * time.Hour)
+	queryTime := time.UnixMilli(maxTs).Add(-10 * time.Second)
 
-	qry, err := engine.NewInstantQuery(
+	qry, err := engine.NewRangeQuery(
 		testQueryable,
-		&promql.QueryOpts{},
+		&promql.QueryOpts{
+			EnablePerStepStats: true,
+			LookbackDelta:      5 * time.Minute,
+		},
 		"histogram_count(test_metric{})",
-		maxTs,
+		startTime,
+		queryTime,
+		10*time.Second,
 	)
 
 	testutil.Ok(t, err)
@@ -903,27 +910,46 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 	testutil.Ok(t, res.Err)
 	testutil.Assert(t, len(res.Warnings) == 0, "expected no warnings")
 
-	fmt.Printf("results: %v\n", res)
-	matrix, err := res.Matrix()
-	if err == nil {
-		fmt.Printf("matrix: %v\n", matrix)
-		for _, s := range matrix {
-			fmt.Printf("series: %v\n", s)
-			for _, p := range s.Points {
-				fmt.Printf("point: %v\n", p)
-			}
-		}
-	}
+	gotMatrix, err := res.Matrix()
+	testutil.Ok(t, err)
 
-	vector, err := res.Vector()
-	if err == nil {
-		fmt.Printf("vector: %v\n", vector)
-	}
-
-	scalar, err := res.Scalar()
-	if err == nil {
-		fmt.Printf("scalar: %v\n", scalar)
-	}
+	testutil.Equals(t, promql.Matrix{
+		promql.Series{
+			Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+			Points: []promql.Point{
+				{V: 4416, T: 836105001},
+				{V: 4416, T: 836115001},
+				{V: 4416, T: 836125001},
+				{V: 4416, T: 836135001},
+				{V: 4416, T: 836145001},
+				{V: 4416, T: 836155001},
+				{V: 4416, T: 836165001},
+				{V: 4416, T: 836175001},
+				{V: 4416, T: 836185001},
+				{V: 4416, T: 836195001},
+				{V: 4416, T: 836205001},
+				{V: 4416, T: 836215001},
+				{V: 4416, T: 836225001},
+				{V: 4416, T: 836235001},
+				{V: 4416, T: 836245001},
+				{V: 4416, T: 836255001},
+				{V: 4416, T: 836265001},
+				{V: 4416, T: 836275001},
+				{V: 4416, T: 836285001},
+				{V: 4416, T: 836295001},
+				{V: 4416, T: 836305001},
+				{V: 4416, T: 836315001},
+				{V: 4416, T: 836325001},
+				{V: 4416, T: 836335001},
+				{V: 4416, T: 836345001},
+				{V: 4416, T: 836355001},
+				{V: 4416, T: 836365001},
+				{V: 4416, T: 836375001},
+				{V: 4416, T: 836385001},
+				{V: 4416, T: 836395001},
+			},
+		},
+	}, gotMatrix)
 }
 
 func prepareStoreFromBucket(t testing.TB, meta *metadata.Meta, bkt objstore.Bucket) *store.BucketStore {
