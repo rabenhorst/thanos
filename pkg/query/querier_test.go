@@ -921,9 +921,11 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 
 		for _, chk := range chks {
 			fmt.Printf(
-				"chunk: %v, %v\n",
+				"chunk: %v (%d), %v (%d)\n",
 				time.UnixMilli(chk.MinTime),
+				chk.MinTime,
 				time.UnixMilli(chk.MaxTime),
+				chk.MaxTime,
 			)
 			acChk, err := chunkr.Chunk(chk)
 			testutil.Ok(t, err)
@@ -959,8 +961,10 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		},
 	)
 
-	startTime := time.UnixMilli(maxTs).Add(-12 * time.Hour)
+	startTime := time.UnixMilli(maxTs).Add(-48 * time.Hour)
 	endTime := time.UnixMilli(maxTs)
+
+	fmt.Printf("running query for: %v - %v", startTime, endTime)
 
 	testCases := []struct {
 		name string
@@ -973,10 +977,9 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 			want: promql.Matrix{
 				promql.Series{
 					// TODO: check these results, they might not be correct.
-					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0040320aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
 					Points: []promql.Point{
-						{V: 18446744073709249000, T: 847905001},
-						{V: 18446744073709190000, T: 853785001},
+						{V: 18446744073708950000, T: 704579999},
 					},
 				},
 			},
@@ -1017,7 +1020,7 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 				testQueryable,
 				&promql.QueryOpts{
 					EnablePerStepStats: true,
-					LookbackDelta:      30 * time.Second,
+					LookbackDelta:      45 * time.Second, // 3 x 15s scrape interval.
 				},
 				"histogram_count(test_metric{})",
 				startTime,
