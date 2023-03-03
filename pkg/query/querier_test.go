@@ -18,6 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/prometheus/tsdb/chunks"
+	"github.com/prometheus/prometheus/tsdb/index"
+
 	storecache "github.com/thanos-io/thanos/pkg/store/cache"
 
 	thanosmodel "github.com/thanos-io/thanos/pkg/model"
@@ -847,10 +850,20 @@ func TestQuerier_Select(t *testing.T) {
 	}
 }
 
+type histogramSample struct {
+	t int64
+	v *histogram.FloatHistogram
+}
+
+func (s histogramSample) String() string {
+	return fmt.Sprintf("t=%v, v={ count: %f, sum: %f }", time.UnixMilli(s.t), s.v.Count, s.v.Sum)
+}
+
 func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 	// create the in fs store
 	// upload blk to bucket
-	meta, bkt := createBucketWithData(t, chunkenc.ValHistogram, compact.ResolutionLevel5m)
+	tmpDir := t.TempDir()
+	meta, bkt := createBucketWithData(t, chunkenc.ValHistogram, compact.ResolutionLevel5m, tmpDir)
 	defer func() {
 		testutil.Ok(t, bkt.Close())
 	}()
@@ -878,6 +891,62 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		NoopSeriesStatsReporter,
 	)
 
+	var chks []chunks.Meta
+	var builder labels.ScratchBuilder
+	indexr, err := index.NewFileReader(filepath.Join(tmpDir, meta.ULID.String(), block.IndexFilename))
+	testutil.Ok(t, err)
+	pall, err := indexr.Postings(index.AllPostingsKey())
+	testutil.Ok(t, err)
+	var series []storage.SeriesRef
+	for pall.Next() {
+		series = append(series, pall.At())
+	}
+
+	allSamples := make(map[string][]histogramSample)
+
+	chunkr, err := chunks.NewDirReader(filepath.Join(tmpDir, meta.ULID.String(), block.ChunksDirname), downsample.NewPool())
+	testutil.Ok(t, err)
+	var reuseIt chunkenc.Iterator
+	samples := make([]histogramSample, 0, 100)
+
+	for _, s := range series {
+		chks = chks[:0]
+		samples = samples[:0]
+		builder.Reset()
+		testutil.Ok(t, indexr.Series(s, &builder, &chks))
+		sort.Slice(chks, func(i, j int) bool {
+			return chks[i].MinTime < chks[j].MinTime
+		})
+		lbs := builder.Labels()
+
+		for _, chk := range chks {
+			fmt.Printf(
+				"chunk: %v, %v\n",
+				time.UnixMilli(chk.MinTime),
+				time.UnixMilli(chk.MaxTime),
+			)
+			acChk, err := chunkr.Chunk(chk)
+			testutil.Ok(t, err)
+			ag, ok := acChk.(*downsample.AggrChunk)
+			testutil.Assert(t, ok, "expected AggrChunk")
+			counter, err := ag.Get(downsample.AggrCounter)
+			testutil.Ok(t, err)
+			it := counter.Iterator(reuseIt)
+			for it.Next() != chunkenc.ValNone {
+				t, fh := it.AtFloatHistogram()
+				samples = append(samples, histogramSample{t: t, v: fh})
+			}
+		}
+		allSamples[lbs.String()] = samples[:]
+	}
+
+	for l, s := range allSamples {
+		fmt.Printf("series: %v\n", l)
+		for _, ss := range s {
+			fmt.Printf("  %v\n", ss)
+		}
+	}
+
 	_, maxTs := bucketStore.TimeRange()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -891,7 +960,7 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 	)
 
 	startTime := time.UnixMilli(maxTs).Add(-12 * time.Hour)
-	queryTime := time.UnixMilli(maxTs).Add(-10 * time.Second)
+	endTime := time.UnixMilli(maxTs)
 
 	testCases := []struct {
 		name string
@@ -952,7 +1021,7 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 				},
 				"histogram_count(test_metric{})",
 				startTime,
-				queryTime,
+				endTime,
 				1*time.Minute,
 			)
 
@@ -1021,12 +1090,10 @@ func prepareStoreFromBucket(t testing.TB, meta *metadata.Meta, bkt objstore.Buck
 	return fsStore
 }
 
-func createBucketWithData(b testing.TB, sampleType chunkenc.ValueType, resolutionLevel compact.ResolutionLevel) (*metadata.Meta, objstore.Bucket) {
+func createBucketWithData(b testing.TB, sampleType chunkenc.ValueType, resolutionLevel compact.ResolutionLevel, tmpDir string) (*metadata.Meta, objstore.Bucket) {
 	var (
 		logger = log.NewNopLogger()
 	)
-
-	tmpDir := b.TempDir()
 
 	bkt := objstore.NewInMemBucket()
 	b.Cleanup(func() {
