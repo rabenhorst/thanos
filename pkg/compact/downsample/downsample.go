@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/exp/slices"
-
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/oklog/ulid"
@@ -190,7 +188,7 @@ func Downsample(
 
 				}
 
-				if IsHistogram(ac) {
+				if isHistogram(ac) {
 					aggrHistoChunks = append(aggrHistoChunks, ac)
 				} else {
 					aggrChunks = append(aggrChunks, ac)
@@ -233,18 +231,13 @@ func Downsample(
 	return
 }
 
-func IsHistogram(c chunkenc.Chunk) bool {
-	histEncs := []chunkenc.Encoding{chunkenc.EncHistogram, chunkenc.EncFloatHistogram}
-	if c.Encoding() == ChunkEncAggr {
-		ch := c.(*AggrChunk)
-		cntr, err := ch.Get(AggrCounter)
-		if err != nil {
-			return false
-		}
-		return slices.Contains(histEncs, cntr.Encoding())
+func isHistogram(c *AggrChunk) bool {
+	// If it is an aggregated chunk histogram chunk, the counter will be of the type histogram.
+	cntr, err := c.Get(AggrCounter)
+	if err != nil {
+		return false
 	}
-
-	return slices.Contains(histEncs, c.Encoding())
+	return cntr.Encoding() == chunkenc.EncHistogram || cntr.Encoding() == chunkenc.EncFloatHistogram
 }
 
 func expandChunkIterator(reuseIt chunkenc.Iterator, chk chunkenc.Chunk, s *samples) error {

@@ -195,20 +195,19 @@ func appendFloatSamples(t testing.TB, app storage.Appender, tsLabel int, opts He
 }
 
 func appendHistogramSamples(t testing.TB, app storage.Appender, tsLabel int, opts HeadGenOptions) {
-	samples := tsdb.GenerateTestHistograms(1)
-	sample := samples[0]
+	histograms := tsdb.GenerateTestHistograms(opts.SamplesPerSeries)
 
 	ref, err := app.AppendHistogram(
 		0,
 		labels.FromStrings("foo", "bar", "i", fmt.Sprintf("%07d%s", tsLabel, LabelLongSuffix), "__name__", "test_metric"),
 		int64(tsLabel)*opts.ScrapeInterval.Milliseconds(),
-		sample,
+		histograms[0],
 		nil,
 	)
 	testutil.Ok(t, err)
 
-	for is := 1; is < opts.SamplesPerSeries; is++ {
-		_, err := app.AppendHistogram(ref, nil, int64(tsLabel+is)*opts.ScrapeInterval.Milliseconds(), sample, nil)
+	for i, h := range histograms[1:] {
+		_, err := app.AppendHistogram(ref, nil, int64(tsLabel+i+1)*opts.ScrapeInterval.Milliseconds(), h, nil)
 		testutil.Ok(t, err)
 	}
 }
