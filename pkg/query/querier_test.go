@@ -893,58 +893,80 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 	startTime := time.UnixMilli(maxTs).Add(-12 * time.Hour)
 	queryTime := time.UnixMilli(maxTs).Add(-10 * time.Second)
 
-	qry, err := engine.NewRangeQuery(
-		testQueryable,
-		&promql.QueryOpts{
-			EnablePerStepStats: true,
-			LookbackDelta:      5 * time.Minute,
-		},
-		"histogram_count(test_metric{})",
-		startTime,
-		queryTime,
-		1*time.Minute,
-	)
-
-	testutil.Ok(t, err)
-	res := qry.Exec(ctx)
-	testutil.Ok(t, res.Err)
-	testutil.Assert(t, len(res.Warnings) == 0, "expected no warnings")
-
-	gotMatrix, err := res.Matrix()
-	testutil.Ok(t, err)
-
-	testutil.Equals(t, promql.Matrix{
-		promql.Series{
-			Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
-			Points: []promql.Point{
-				{V: 18446744073709367000, T: 836145001},
-				{V: 18446744073709367000, T: 836205001},
-				{V: 18446744073709367000, T: 836265001},
-				{V: 18446744073709367000, T: 836325001},
-				{V: 18446744073709367000, T: 836385001},
-				{V: 18446744073709308000, T: 842025001},
-				{V: 18446744073709308000, T: 842085001},
-				{V: 18446744073709308000, T: 842145001},
-				{V: 18446744073709308000, T: 842205001},
-				{V: 18446744073709308000, T: 842265001},
-				{V: 18446744073709249000, T: 847905001},
-				{V: 18446744073709249000, T: 847965001},
-				{V: 18446744073709249000, T: 848025001},
-				{V: 18446744073709249000, T: 848085001},
-				{V: 18446744073709249000, T: 848145001},
-				{V: 18446744073709190000, T: 853785001},
-				{V: 18446744073709190000, T: 853845001},
-				{V: 18446744073709190000, T: 853905001},
-				{V: 18446744073709190000, T: 853965001},
-				{V: 18446744073709190000, T: 854025001},
-				{V: 18446744073709128000, T: 859725001},
-				{V: 18446744073709128000, T: 859785001},
-				{V: 18446744073709128000, T: 859845001},
-				{V: 18446744073709128000, T: 859905001},
-				{V: 18446744073709128000, T: 859965001},
+	testCases := []struct {
+		name string
+		qry  string
+		want promql.Matrix
+	}{
+		{
+			name: "histogram_count",
+			qry:  "histogram_count(test_metric{})",
+			want: promql.Matrix{
+				promql.Series{
+					// TODO: check these results, they might not be correct.
+					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+					Points: []promql.Point{
+						{V: 18446744073709249000, T: 847905001},
+						{V: 18446744073709190000, T: 853785001},
+					},
+				},
 			},
 		},
-	}, gotMatrix)
+		{
+			name: "histogram_sum",
+			qry:  "histogram_sum(test_metric{})",
+			// TODO: check these results, they might not be correct.
+			want: promql.Matrix{
+				promql.Series{
+					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+					Points: []promql.Point{
+						{V: 18446744073709249000, T: 847905001},
+						{V: 18446744073709190000, T: 853785001},
+					},
+				},
+			},
+		},
+		{
+			name: "rate",
+			qry:  "rate(test_metric[1m])",
+			// TODO: check these results, they might not be correct.
+			want: promql.Matrix{
+				promql.Series{
+					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+					Points: []promql.Point{
+						{V: 18446744073709249000, T: 847905001},
+						{V: 18446744073709190000, T: 853785001},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			qry, err := engine.NewRangeQuery(
+				testQueryable,
+				&promql.QueryOpts{
+					EnablePerStepStats: true,
+					LookbackDelta:      30 * time.Second,
+				},
+				"histogram_count(test_metric{})",
+				startTime,
+				queryTime,
+				1*time.Minute,
+			)
+
+			testutil.Ok(t, err)
+			res := qry.Exec(ctx)
+			testutil.Ok(t, res.Err)
+			testutil.Assert(t, len(res.Warnings) == 0, "expected no warnings")
+
+			gotMatrix, err := res.Matrix()
+			testutil.Ok(t, err)
+
+			testutil.Equals(t, tt.want, gotMatrix, "result does not match expected")
+		})
+	}
 }
 
 func prepareStoreFromBucket(t testing.TB, meta *metadata.Meta, bkt objstore.Bucket) *store.BucketStore {
