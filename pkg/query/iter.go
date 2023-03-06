@@ -177,7 +177,7 @@ func chunkEncoding(e storepb.Chunk_Encoding) chunkenc.Encoding {
 	case storepb.Chunk_XOR:
 		return chunkenc.EncXOR
 	case storepb.Chunk_HISTOGRAM:
-		return chunkenc.EncHistogram
+		return chunkenc.EncFloatHistogram
 	}
 	return 255 // Invalid.
 }

@@ -890,8 +890,8 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		},
 	)
 
-	startTime := time.UnixMilli(maxTs).Add(-12 * time.Hour)
-	queryTime := time.UnixMilli(maxTs).Add(-10 * time.Second)
+	startTime := time.UnixMilli(maxTs).Add(-24 * time.Hour)
+	queryTime := time.UnixMilli(maxTs)
 
 	testCases := []struct {
 		name string
@@ -903,11 +903,17 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 			qry:  "histogram_count(test_metric{})",
 			want: promql.Matrix{
 				promql.Series{
-					// TODO: check these results, they might not be correct.
+					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0046080aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+					Points: []promql.Point{
+						{V: 637552, T: 777585001},
+					},
+				},
+				promql.Series{
 					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
 					Points: []promql.Point{
-						{V: 18446744073709249000, T: 847905001},
-						{V: 18446744073709190000, T: 853785001},
+						{V: 17232, T: 806685001},
+						{V: 327632, T: 835785001},
+						{V: 637552, T: 863985001},
 					},
 				},
 			},
@@ -918,10 +924,20 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 			// TODO: check these results, they might not be correct.
 			want: promql.Matrix{
 				promql.Series{
+					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{
+						Name:  "i",
+						Value: "0046080aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd",
+					}},
+					Points: []promql.Point{
+						{V: 637552, T: 777585001},
+					},
+				},
+				promql.Series{
 					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
 					Points: []promql.Point{
-						{V: 18446744073709249000, T: 847905001},
-						{V: 18446744073709190000, T: 853785001},
+						{V: 17232, T: 806685001},
+						{V: 327632, T: 835785001},
+						{V: 637552, T: 863985001},
 					},
 				},
 			},
@@ -932,10 +948,17 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 			// TODO: check these results, they might not be correct.
 			want: promql.Matrix{
 				promql.Series{
+					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0046080aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+					Points: []promql.Point{
+						{V: 637552, T: 777585001},
+					},
+				},
+				promql.Series{
 					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
 					Points: []promql.Point{
-						{V: 18446744073709249000, T: 847905001},
-						{V: 18446744073709190000, T: 853785001},
+						{V: 17232, T: 806685001},
+						{V: 327632, T: 835785001},
+						{V: 637552, T: 863985001},
 					},
 				},
 			},
