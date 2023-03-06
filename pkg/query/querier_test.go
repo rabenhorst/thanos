@@ -890,21 +890,24 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		},
 	)
 
-	startTime := time.UnixMilli(maxTs).Add(-24 * time.Hour)
-	queryTime := time.UnixMilli(maxTs)
-
 	testCases := []struct {
-		name string
-		qry  string
-		want promql.Matrix
+		name  string
+		qry   string
+		start time.Time
+		end   time.Time
+		want  promql.Matrix
 	}{
 		{
-			name: "histogram_count",
-			qry:  "histogram_count(test_metric{})",
+			name:  "histogram_count",
+			qry:   "histogram_count(test_metric{})",
+			start: time.UnixMilli(maxTs).Add(-44 * time.Hour),
+			end:   time.UnixMilli(maxTs),
 			want: promql.Matrix{
 				promql.Series{
 					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0046080aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
 					Points: []promql.Point{
+						{V: 17232, T: 720285001},
+						{V: 327632, T: 749385001},
 						{V: 637552, T: 777585001},
 					},
 				},
@@ -919,8 +922,10 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 			},
 		},
 		{
-			name: "histogram_sum",
-			qry:  "histogram_sum(test_metric{})",
+			name:  "histogram_sum",
+			qry:   "histogram_sum(test_metric{})",
+			start: time.UnixMilli(maxTs).Add(-24 * time.Hour),
+			end:   time.UnixMilli(maxTs),
 			// TODO: check these results, they might not be correct.
 			want: promql.Matrix{
 				promql.Series{
@@ -943,8 +948,10 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 			},
 		},
 		{
-			name: "rate",
-			qry:  "rate(test_metric[1m])",
+			name:  "rate",
+			qry:   "rate(test_metric[1m])",
+			start: time.UnixMilli(maxTs).Add(-24 * time.Hour),
+			end:   time.UnixMilli(maxTs),
 			// TODO: check these results, they might not be correct.
 			want: promql.Matrix{
 				promql.Series{
@@ -975,8 +982,8 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 					LookbackDelta: 3 * 15 * time.Second,
 				},
 				"histogram_count(test_metric{})",
-				startTime,
-				queryTime,
+				tt.start,
+				tt.end,
 				5*time.Minute,
 			)
 
