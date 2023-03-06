@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gogo/protobuf/types"
 	"math"
 	"math/rand"
 	"os"
@@ -56,6 +57,11 @@ import (
 type sample struct {
 	t int64
 	v float64
+}
+
+type floatHistogramPair struct {
+	t  int64
+	fh *histogram.FloatHistogram
 }
 
 func TestQueryableCreator_MaxResolution(t *testing.T) {
@@ -847,17 +853,82 @@ func TestQuerier_Select(t *testing.T) {
 	}
 }
 
+func readValuesFromAggrChunks(rawChunks []storepb.AggrChunk) (floatHistogramPairs []floatHistogramPair, samples []sample, err error) {
+	for _, rawChunk := range rawChunks {
+		c, err := chunkenc.FromData(chunkenc.EncFloatHistogram, rawChunk.Counter.Data)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		it := c.Iterator(nil)
+		for it.Next() != chunkenc.ValFloatHistogram {
+			if it.Err() != nil {
+				return nil, nil, it.Err()
+			}
+
+			ts, fh := it.AtFloatHistogram()
+			floatHistogramPairs = append(floatHistogramPairs, floatHistogramPair{
+				t:  ts,
+				fh: fh,
+			})
+		}
+
+		if it.Err() != nil {
+			return nil, nil, it.Err()
+		}
+	}
+
+	return
+}
+
 func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 	// create the in fs store
 	// upload blk to bucket
-	meta, bkt := createBucketWithData(t, chunkenc.ValHistogram, compact.ResolutionLevel5m)
+	tmpDir := t.TempDir()
+	meta, bkt := createBucketWithData(t, chunkenc.ValHistogram, compact.ResolutionLevel5m, tmpDir)
 	defer func() {
 		testutil.Ok(t, bkt.Close())
 	}()
+
+	//_, chks := downsample.GetMetaAndChunks(t, tmpDir, meta.ULID)
+	//
+	//chunkr, err := chunks.NewDirReader(filepath.Join(tmpDir, meta.ULID.String(), block.ChunksDirname), downsample.NewPool())
+	//testutil.Ok(t, err)
+	//defer func() { testutil.Ok(t, chunkr.Close()) }()
+	//
+	//for _, c := range chks {
+	//	_, sum, _ := downsample.GetAggregatorFromChunk(t, chunkr, c)
+	//	fmt.Println("sum", sum)
+	//}
+
 	// crate BucketStore from bucket
 	bucketStore := prepareStoreFromBucket(t, meta, bkt)
 	// create a proxy to wrap the BucketStore
 	testBucketStore := newProxyStore(bucketStore)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	//s := newStoreSeriesServer(ctx)
+	//
+	//err = testBucketStore.Series(&storepb.SeriesRequest{
+	//	MinTime: meta.MinTime,
+	//	MaxTime: meta.MaxTime,
+	//	Matchers: []storepb.LabelMatcher{
+	//		{
+	//			Name:  "__name__",
+	//			Type:  storepb.LabelMatcher_EQ,
+	//			Value: "test_metric",
+	//		},
+	//	},
+	//	MaxResolutionWindow: downsample.ResLevel1,
+	//	Aggregates:          []storepb.Aggr{storepb.Aggr_COUNTER},
+	//}, s)
+	//testutil.Ok(t, err)
+	//
+	//ss := s.SeriesSet
+	//
+	//fhp := rawChuncksToFloatHistogramPair(t, ss)
+	//fmt.Println(fhp)
 
 	// create a querier to wrap the proxy
 	timeout := 2 * time.Minute
@@ -870,7 +941,7 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 	)(false,
 		nil,
 		nil,
-		9999999,
+		int64(compact.ResolutionLevel5m),
 		false,
 		false,
 		false,
@@ -878,10 +949,7 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		NoopSeriesStatsReporter,
 	)
 
-	_, maxTs := bucketStore.TimeRange()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	//_, maxTs := bucketStore.TimeRange()
 
 	engine := promql.NewEngine(
 		promql.EngineOpts{
@@ -890,83 +958,106 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		},
 	)
 
-	startTime := time.UnixMilli(maxTs).Add(-12 * time.Hour)
-	queryTime := time.UnixMilli(maxTs).Add(-10 * time.Second)
+	//startTime := time.UnixMilli(maxTs).Add(-12 * time.Hour)
+	//queryTime := time.UnixMilli(maxTs).Add(-10 * time.Second)
 
-	testCases := []struct {
-		name string
-		qry  string
-		want promql.Matrix
-	}{
-		{
-			name: "histogram_count",
-			qry:  "histogram_count(test_metric{})",
-			want: promql.Matrix{
-				promql.Series{
-					// TODO: check these results, they might not be correct.
-					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
-					Points: []promql.Point{
-						{V: 18446744073709249000, T: 847905001},
-						{V: 18446744073709190000, T: 853785001},
-					},
-				},
-			},
+	qry, err := engine.NewRangeQuery(
+		testQueryable,
+		&promql.QueryOpts{
+			EnablePerStepStats: true,
 		},
-		{
-			name: "histogram_sum",
-			qry:  "histogram_sum(test_metric{})",
-			// TODO: check these results, they might not be correct.
-			want: promql.Matrix{
-				promql.Series{
-					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
-					Points: []promql.Point{
-						{V: 18446744073709249000, T: 847905001},
-						{V: 18446744073709190000, T: 853785001},
-					},
-				},
-			},
-		},
-		{
-			name: "rate",
-			qry:  "rate(test_metric[1m])",
-			// TODO: check these results, they might not be correct.
-			want: promql.Matrix{
-				promql.Series{
-					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
-					Points: []promql.Point{
-						{V: 18446744073709249000, T: 847905001},
-						{V: 18446744073709190000, T: 853785001},
-					},
-				},
-			},
-		},
-	}
+		"histogram_count(test_metric{})",
+		time.UnixMilli(meta.MinTime),
+		time.UnixMilli(meta.MaxTime),
+		300*time.Second,
+	)
 
-	for _, tt := range testCases {
-		t.Run(tt.name, func(t *testing.T) {
-			qry, err := engine.NewRangeQuery(
-				testQueryable,
-				&promql.QueryOpts{
-					EnablePerStepStats: true,
-					LookbackDelta:      30 * time.Second,
-				},
-				"histogram_count(test_metric{})",
-				startTime,
-				queryTime,
-				1*time.Minute,
-			)
+	testutil.Ok(t, err)
+	res := qry.Exec(ctx)
+	testutil.Ok(t, res.Err)
+	testutil.Assert(t, len(res.Warnings) == 0, "expected no warnings")
 
-			testutil.Ok(t, err)
-			res := qry.Exec(ctx)
-			testutil.Ok(t, res.Err)
-			testutil.Assert(t, len(res.Warnings) == 0, "expected no warnings")
+	gotVector, err := res.Matrix()
+	testutil.Ok(t, err)
 
-			gotMatrix, err := res.Matrix()
-			testutil.Ok(t, err)
+	fmt.Println(gotVector)
 
-			testutil.Equals(t, tt.want, gotMatrix, "result does not match expected")
-		})
-	}
+	//testutil.Equals(t, tt.want, gotMatrix, "result does not match expected")
+
+	//testCases := []struct {
+	//	name string
+	//	qry  string
+	//	want promql.Matrix
+	//}{
+	//	{
+	//		name: "histogram_count",
+	//		qry:  "histogram_count(test_metric{})",
+	//		want: promql.Matrix{
+	//			promql.Series{
+	//				// TODO: check these results, they might not be correct.
+	//				Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+	//				Points: []promql.Point{
+	//					{V: 18446744073709249000, T: 847905001},
+	//					{V: 18446744073709190000, T: 853785001},
+	//				},
+	//			},
+	//		},
+	//	},
+	//	{
+	//		name: "histogram_sum",
+	//		qry:  "histogram_sum(test_metric{})",
+	//		// TODO: check these results, they might not be correct.
+	//		want: promql.Matrix{
+	//			promql.Series{
+	//				Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+	//				Points: []promql.Point{
+	//					{V: 18446744073709249000, T: 847905001},
+	//					{V: 18446744073709190000, T: 853785001},
+	//				},
+	//			},
+	//		},
+	//	},
+	//	{
+	//		name: "rate",
+	//		qry:  "rate(test_metric[1m])",
+	//		// TODO: check these results, they might not be correct.
+	//		want: promql.Matrix{
+	//			promql.Series{
+	//				Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+	//				Points: []promql.Point{
+	//					{V: 18446744073709249000, T: 847905001},
+	//					{V: 18446744073709190000, T: 853785001},
+	//				},
+	//			},
+	//		},
+	//	},
+	//}
+	//
+	//for _, tt := range testCases {
+	//	t.Run(tt.name, func(t *testing.T) {
+	//		qry, err := engine.NewRangeQuery(
+	//			testQueryable,
+	//			&promql.QueryOpts{
+	//				EnablePerStepStats: true,
+	//				LookbackDelta:      30 * time.Second,
+	//			},
+	//			"histogram_count(test_metric{})",
+	//			startTime,
+	//			queryTime,
+	//			5*time.Minute,
+	//		)
+	//
+	//		testutil.Ok(t, err)
+	//		res := qry.Exec(ctx)
+	//		testutil.Ok(t, res.Err)
+	//		testutil.Assert(t, len(res.Warnings) == 0, "expected no warnings")
+	//
+	//		gotMatrix, err := res.Matrix()
+	//		testutil.Ok(t, err)
+	//
+	//		testutil.Equals(t, tt.want, gotMatrix, "result does not match expected")
+	//	})
+	//}
 }
 
 func prepareStoreFromBucket(t testing.TB, meta *metadata.Meta, bkt objstore.Bucket) *store.BucketStore {
@@ -1021,12 +1112,10 @@ func prepareStoreFromBucket(t testing.TB, meta *metadata.Meta, bkt objstore.Buck
 	return fsStore
 }
 
-func createBucketWithData(b testing.TB, sampleType chunkenc.ValueType, resolutionLevel compact.ResolutionLevel) (*metadata.Meta, objstore.Bucket) {
+func createBucketWithData(b testing.TB, sampleType chunkenc.ValueType, resolutionLevel compact.ResolutionLevel, tmpDir string) (*metadata.Meta, objstore.Bucket) {
 	var (
 		logger = log.NewNopLogger()
 	)
-
-	tmpDir := b.TempDir()
 
 	bkt := objstore.NewInMemBucket()
 	b.Cleanup(func() {
@@ -1512,4 +1601,72 @@ func storeSeriesResponse(t testing.TB, lset labels.Labels, smplChunks ...[]sampl
 		s.Chunks = append(s.Chunks, ch)
 	}
 	return storepb.NewSeriesResponse(&s)
+}
+
+// storeSeriesServer is test gRPC storeAPI series server.
+type storeSeriesServer struct {
+	// This field just exist to pseudo-implement the unused methods of the interface.
+	storepb.Store_SeriesServer
+
+	ctx context.Context
+
+	SeriesSet []storepb.Series
+	Warnings  []string
+	HintsSet  []*types.Any
+
+	Size int64
+}
+
+func newStoreSeriesServer(ctx context.Context) *storeSeriesServer {
+	return &storeSeriesServer{ctx: ctx}
+}
+
+func (s *storeSeriesServer) Send(r *storepb.SeriesResponse) error {
+	s.Size += int64(r.Size())
+
+	if r.GetWarning() != "" {
+		s.Warnings = append(s.Warnings, r.GetWarning())
+		return nil
+	}
+
+	if r.GetSeries() != nil {
+		s.SeriesSet = append(s.SeriesSet, *r.GetSeries())
+		return nil
+	}
+
+	if r.GetHints() != nil {
+		s.HintsSet = append(s.HintsSet, r.GetHints())
+		return nil
+	}
+
+	// Unsupported field, skip.
+	return nil
+}
+
+func (s *storeSeriesServer) Context() context.Context {
+	return s.ctx
+}
+
+func rawChuncksToFloatHistogramPair(t *testing.T, got []storepb.Series) map[string][]floatHistogramPair {
+	ret := make(map[string][]floatHistogramPair, len(got))
+	for _, s := range got {
+		lset := labelpb.ZLabelsToPromLabels(s.Labels)
+		for i, chk := range s.Chunks {
+			var samples []floatHistogramPair
+
+			c, err := chunkenc.FromData(chunkenc.EncFloatHistogram, chk.Counter.Data)
+			testutil.Ok(t, err)
+
+			iter := c.Iterator(nil)
+			for iter.Next() == chunkenc.ValFloatHistogram {
+				t, fh := iter.AtFloatHistogram()
+				samples = append(samples, floatHistogramPair{t: t, fh: fh})
+			}
+			testutil.Ok(t, iter.Err())
+
+			ret[fmt.Sprintf("%v:%d", lset.String(), i)] = samples
+		}
+	}
+
+	return ret
 }

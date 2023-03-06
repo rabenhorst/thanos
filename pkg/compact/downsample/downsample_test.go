@@ -10,8 +10,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/oklog/ulid"
-
 	"github.com/go-kit/log"
 	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/model/histogram"
@@ -678,7 +676,7 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	id, err := Downsample(logger, fakeMeta, mb, dir, 400)
 	testutil.Ok(t, err)
 
-	newMeta, chks := getMetaAndChunks(t, dir, id)
+	newMeta, chks := GetMetaAndChunks(t, dir, id)
 
 	expected := []struct {
 		count   []sample
@@ -720,7 +718,7 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	defer func() { testutil.Ok(t, chunkr.Close()) }()
 
 	for i, c := range chks {
-		count, _, counter := getAggregatorFromChunk(t, chunkr, c)
+		count, _, counter := GetAggregatorFromChunk(t, chunkr, c)
 		testutil.Equals(t, expected[i].count, count)
 
 		compareHistograms(t, expected[i].counter, counter)
@@ -742,77 +740,6 @@ func compareHistograms(t *testing.T, expected []sample, got []sample) {
 		testutil.Assert(t, math.Abs(e.fh.Count-got[i].fh.Count) < 0.00001, "expected sample at %d to have count %d, got %d", i, e.fh.Count, got[i].fh.Count)
 		testutil.Assert(t, math.Abs(e.fh.Sum-got[i].fh.Sum) < 0.00001, "expected sample at %d to have sum %f, got %f", i, e.fh.Sum, got[i].fh.Sum)
 	}
-}
-
-func getAggregatorFromChunk(t *testing.T, chunkr *chunks.Reader, c chunks.Meta) (count []sample, sum []sample, counter []sample) {
-	chk, err := chunkr.Chunk(c)
-	testutil.Ok(t, err)
-
-	ag, ok := chk.(*AggrChunk)
-	testutil.Assert(t, ok)
-
-	return expandHistogramAggregatorChunk(t, ag)
-}
-
-func getMetaAndChunks(t *testing.T, dir string, id ulid.ULID) (*metadata.Meta, []chunks.Meta) {
-	newMeta, err := metadata.ReadFromDir(filepath.Join(dir, id.String()))
-	testutil.Ok(t, err)
-
-	testutil.Equals(t, int64(400), newMeta.Thanos.Downsample.Resolution)
-
-	indexr, err := index.NewFileReader(filepath.Join(dir, id.String(), block.IndexFilename))
-	testutil.Ok(t, err)
-	defer func() { testutil.Ok(t, indexr.Close()) }()
-
-	pall, err := indexr.Postings(index.AllPostingsKey())
-	testutil.Ok(t, err)
-
-	var series []storage.SeriesRef
-	for pall.Next() {
-		series = append(series, pall.At())
-	}
-	testutil.Ok(t, pall.Err())
-	testutil.Equals(t, 1, len(series))
-
-	var chks []chunks.Meta
-	var lset labels.Labels
-	var builder labels.ScratchBuilder
-	testutil.Ok(t, indexr.Series(series[0], &builder, &chks))
-	lset = builder.Labels()
-	testutil.Equals(t, labels.FromStrings("__name__", "a"), lset)
-
-	return newMeta, chks
-}
-
-func expandHistogramAggregatorChunk(t *testing.T, c *AggrChunk) (count []sample, sum []sample, counter []sample) {
-	countChunk, err := c.Get(AggrCount)
-	testutil.Ok(t, err, "get histogram aggregator count chunk")
-	it := countChunk.Iterator(nil)
-	for it.Next() != chunkenc.ValNone {
-		t, v := it.At()
-		count = append(count, sample{t: t, v: v})
-	}
-	testutil.Ok(t, it.Err())
-
-	sumChunk, err := c.Get(AggrSum)
-	testutil.Ok(t, err, "get histogram aggregator sum chunk")
-	it = sumChunk.Iterator(nil)
-	for it.Next() != chunkenc.ValNone {
-		t, fh := it.AtFloatHistogram()
-		sum = append(sum, sample{t, 0, fh})
-	}
-	testutil.Ok(t, it.Err())
-
-	counterChunk, err := c.Get(AggrCounter)
-	testutil.Ok(t, err, "get histogram aggregator counter chunk")
-	it = counterChunk.Iterator(nil)
-	for it.Next() != chunkenc.ValNone {
-		t, fh := it.AtFloatHistogram()
-		counter = append(counter, sample{t, 0, fh})
-	}
-	testutil.Ok(t, it.Err())
-
-	return count, sum, counter
 }
 
 func chunksToSeriesIteratable(t *testing.T, inRaw [][]sample, inAggr []map[AggrType][]sample) *series {
