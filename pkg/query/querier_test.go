@@ -971,12 +971,13 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 				testQueryable,
 				&promql.QueryOpts{
 					EnablePerStepStats: true,
-					LookbackDelta:      30 * time.Second,
+					// 3 * 15s (scrape interval)
+					LookbackDelta: 3 * 15 * time.Second,
 				},
 				"histogram_count(test_metric{})",
 				startTime,
 				queryTime,
-				1*time.Minute,
+				5*time.Minute,
 			)
 
 			testutil.Ok(t, err)
