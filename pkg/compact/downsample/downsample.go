@@ -1148,12 +1148,12 @@ func (it *AverageChunkIterator) Err() error {
 }
 
 // SamplesFromTSDBSamples converts tsdbutil.Sample slice to samples.
-func SamplesFromTSDBSamples(samples []tsdbutil.Sample) []sample {
-	res := make([]sample, len(samples))
-	for i, s := range samples {
+func SamplesFromTSDBSamples(spls []tsdbutil.Sample) samples {
+	res := make([]sample, len(spls))
+	for i, s := range spls {
 		res[i] = sample{t: s.T(), v: s.V()}
 	}
-	return res
+	return samples{floatSamples: res}
 }
 
 // GatherNoDownsampleMarkFilter is a block.Fetcher filter that passes all metas.

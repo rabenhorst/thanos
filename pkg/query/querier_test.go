@@ -1074,6 +1074,7 @@ func createBucketWithData(b testing.TB, sampleType chunkenc.ValueType, resolutio
 		Random:           rand.New(rand.NewSource(120)),
 		SkipChunks:       true,
 		SampleType:       sampleType,
+		IncludeName:      true,
 	})
 	blockID := storetestutil.CreateBlockFromHead(b, tmpDir, head)
 
