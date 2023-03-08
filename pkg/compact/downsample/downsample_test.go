@@ -10,8 +10,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/oklog/ulid"
-
 	"github.com/go-kit/log"
 	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/model/histogram"
@@ -632,13 +630,14 @@ func TestDownsampleAggrAndNonEmptyXORChunks(t *testing.T) {
 
 }
 
-type histogramH struct {
-	count   float64
-	sum     float64
-	buckets []bucket
+type expectedHistogram struct {
+	counterResetHint histogram.CounterResetHint
+	count            float64
+	sum              float64
+	buckets          []expectedBucket
 }
 
-type bucket struct {
+type expectedBucket struct {
 	upperBound          float64
 	lowerBound          float64
 	count               int64
@@ -654,10 +653,17 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	app, err := raw.Appender()
 	testutil.Ok(t, err)
 
-	histograms := tsdb.GenerateTestFloatHistograms(4)
+	histogramsCount := 30
+	scrapeInterval := int64(30_000)
 
+	histograms := tsdb.GenerateTestFloatHistograms(histogramsCount)
+	histogramSamples := make([]sample, 0, len(histograms))
 	for i, h := range histograms {
-		app.AppendFloatHistogram(int64(i+1)*200, h)
+		histogramSamples = append(histogramSamples, sample{t: int64(i+1) * scrapeInterval, fh: h})
+	}
+
+	for _, hs := range histogramSamples {
+		app.AppendFloatHistogram(hs.t, hs.fh)
 	}
 
 	ser.chunks = append(ser.chunks, chunks.Meta{
@@ -671,45 +677,56 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 
 	fakeMeta := &metadata.Meta{
 		BlockMeta: tsdb.BlockMeta{
-			MinTime: 399,
-			MaxTime: 800,
+			MinTime: 0,
+			MaxTime: histogramSamples[len(histogramSamples)-1].t,
 		},
 	}
-	id, err := Downsample(logger, fakeMeta, mb, dir, 400)
+	id, err := Downsample(logger, fakeMeta, mb, dir, ResLevel1)
 	testutil.Ok(t, err)
 
-	newMeta, chks := getMetaAndChunks(t, dir, id)
+	meta, chks := GetMetaAndChunks(t, dir, id)
 
 	expected := []struct {
-		count   []sample
-		sum     []sample
-		counter []sample
+		count, sum, counter []sample
 	}{
 		{
-			count: []sample{{t: 399, v: 1}, {t: 799, v: 2}, {t: 800, v: 1}},
+			count: []sample{
+				{t: 299_999, v: 9}, {t: 599_999, v: 10}, {t: 899_999, v: 10}, {t: 900_000, v: 1},
+			},
 			counter: []sample{
 				{
-					t: 399, fh: &histogram.FloatHistogram{
-						CounterResetHint: histogram.UnknownCounterReset,
-						Count:            10,
-						Sum:              18.4,
-					},
+					t:  299_999,
+					fh: generateTestFloatHistogramsCounter(9, histogram.UnknownCounterReset),
 				},
 				{
-					t: 799, fh: &histogram.FloatHistogram{
-						CounterResetHint: histogram.UnknownCounterReset,
-
-						Count: 26,
-						Sum:   55.2,
-					},
+					t:  599_999,
+					fh: generateTestFloatHistogramsCounter(19, histogram.NotCounterReset),
 				},
 				{
-					t: 800, fh: &histogram.FloatHistogram{
-						CounterResetHint: histogram.UnknownCounterReset,
-
-						Count: 34,
-						Sum:   73.6,
-					},
+					t:  899_999,
+					fh: generateTestFloatHistogramsCounter(29, histogram.NotCounterReset),
+				},
+				{
+					t:  900_000,
+					fh: generateTestFloatHistogramsCounter(30, histogram.NotCounterReset),
+				},
+			},
+			sum: []sample{
+				{
+					t:  299_999,
+					fh: generateTestFloatHistogramsSum(0, 8, histogram.UnknownCounterReset),
+				},
+				{
+					t:  599_999,
+					fh: generateTestFloatHistogramsSum(9, 18, histogram.NotCounterReset),
+				},
+				{
+					t:  899_999,
+					fh: generateTestFloatHistogramsSum(19, 28, histogram.NotCounterReset),
+				},
+				{
+					t:  900_000,
+					fh: generateTestFloatHistogramsSum(29, 29, histogram.NotCounterReset),
 				},
 			},
 		},
@@ -720,99 +737,39 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	defer func() { testutil.Ok(t, chunkr.Close()) }()
 
 	for i, c := range chks {
-		count, _, counter := getAggregatorFromChunk(t, chunkr, c)
-		testutil.Equals(t, expected[i].count, count)
+		count := GetAggregateFromChunk(t, chunkr, c, AggrCount)
+		testutil.Equals(t, expected[i].count, count, "count mismatch for chunk %d", i)
 
-		compareHistograms(t, expected[i].counter, counter)
+		sum := GetAggregateFromChunk(t, chunkr, c, AggrSum)
+		testutil.Equals(t, expected[i].sum, sum, "sum mismatch for chunk %d", i)
+
+		counter := GetAggregateFromChunk(t, chunkr, c, AggrCounter)
+		testutil.Equals(t, expected[i].counter, counter, "counter mismatch for chunk %d", i)
 	}
 
 	blk, err := tsdb.OpenBlock(logger, filepath.Join(dir, id.String()), NewPool())
 	testutil.Ok(t, err)
-	newId, err := Downsample(logger, newMeta, blk, dir, 800)
+	newId, err := Downsample(logger, meta, blk, dir, ResLevel2)
 	testutil.Ok(t, err)
 
 	_, err = metadata.ReadFromDir(filepath.Join(dir, newId.String()))
 	testutil.Ok(t, err)
 }
 
-func compareHistograms(t *testing.T, expected []sample, got []sample) {
-	testutil.Equals(t, len(expected), len(got), "expected %d samples, got %d", len(expected), len(got))
-	for i, e := range expected {
-		testutil.Equals(t, e.t, got[i].t, "expected sample at %d to have timestamp %d, got %d", i, e.t, got[i].t)
-		testutil.Assert(t, math.Abs(e.fh.Count-got[i].fh.Count) < 0.00001, "expected sample at %d to have count %d, got %d", i, e.fh.Count, got[i].fh.Count)
-		testutil.Assert(t, math.Abs(e.fh.Sum-got[i].fh.Sum) < 0.00001, "expected sample at %d to have sum %f, got %f", i, e.fh.Sum, got[i].fh.Sum)
+func generateTestFloatHistogramsSum(fromIdx, toIdx int, counterResetHint histogram.CounterResetHint) *histogram.FloatHistogram {
+	histograms := tsdb.GenerateTestFloatHistograms(toIdx + 1)[fromIdx:]
+	sum := histograms[0]
+	for _, h := range histograms[1:] {
+		sum.Add(h)
 	}
+	sum.CounterResetHint = counterResetHint
+	return sum
 }
 
-func getAggregatorFromChunk(t *testing.T, chunkr *chunks.Reader, c chunks.Meta) (count []sample, sum []sample, counter []sample) {
-	chk, err := chunkr.Chunk(c)
-	testutil.Ok(t, err)
-
-	ag, ok := chk.(*AggrChunk)
-	testutil.Assert(t, ok)
-
-	return expandHistogramAggregatorChunk(t, ag)
-}
-
-func getMetaAndChunks(t *testing.T, dir string, id ulid.ULID) (*metadata.Meta, []chunks.Meta) {
-	newMeta, err := metadata.ReadFromDir(filepath.Join(dir, id.String()))
-	testutil.Ok(t, err)
-
-	testutil.Equals(t, int64(400), newMeta.Thanos.Downsample.Resolution)
-
-	indexr, err := index.NewFileReader(filepath.Join(dir, id.String(), block.IndexFilename))
-	testutil.Ok(t, err)
-	defer func() { testutil.Ok(t, indexr.Close()) }()
-
-	pall, err := indexr.Postings(index.AllPostingsKey())
-	testutil.Ok(t, err)
-
-	var series []storage.SeriesRef
-	for pall.Next() {
-		series = append(series, pall.At())
-	}
-	testutil.Ok(t, pall.Err())
-	testutil.Equals(t, 1, len(series))
-
-	var chks []chunks.Meta
-	var lset labels.Labels
-	var builder labels.ScratchBuilder
-	testutil.Ok(t, indexr.Series(series[0], &builder, &chks))
-	lset = builder.Labels()
-	testutil.Equals(t, labels.FromStrings("__name__", "a"), lset)
-
-	return newMeta, chks
-}
-
-func expandHistogramAggregatorChunk(t *testing.T, c *AggrChunk) (count []sample, sum []sample, counter []sample) {
-	countChunk, err := c.Get(AggrCount)
-	testutil.Ok(t, err, "get histogram aggregator count chunk")
-	it := countChunk.Iterator(nil)
-	for it.Next() != chunkenc.ValNone {
-		t, v := it.At()
-		count = append(count, sample{t: t, v: v})
-	}
-	testutil.Ok(t, it.Err())
-
-	sumChunk, err := c.Get(AggrSum)
-	testutil.Ok(t, err, "get histogram aggregator sum chunk")
-	it = sumChunk.Iterator(nil)
-	for it.Next() != chunkenc.ValNone {
-		t, fh := it.AtFloatHistogram()
-		sum = append(sum, sample{t, 0, fh})
-	}
-	testutil.Ok(t, it.Err())
-
-	counterChunk, err := c.Get(AggrCounter)
-	testutil.Ok(t, err, "get histogram aggregator counter chunk")
-	it = counterChunk.Iterator(nil)
-	for it.Next() != chunkenc.ValNone {
-		t, fh := it.AtFloatHistogram()
-		counter = append(counter, sample{t, 0, fh})
-	}
-	testutil.Ok(t, it.Err())
-
-	return count, sum, counter
+func generateTestFloatHistogramsCounter(n int, counterResetHint histogram.CounterResetHint) *histogram.FloatHistogram {
+	h := tsdb.GenerateTestFloatHistograms(n)[n-1]
+	h.CounterResetHint = counterResetHint
+	return h
 }
 
 func chunksToSeriesIteratable(t *testing.T, inRaw [][]sample, inAggr []map[AggrType][]sample) *series {

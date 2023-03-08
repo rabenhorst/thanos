@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/prometheus/prometheus/tsdb/chunks"
 	"math"
 	"math/rand"
 	"os"
@@ -850,10 +851,22 @@ func TestQuerier_Select(t *testing.T) {
 func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 	// create the in fs store
 	// upload blk to bucket
-	meta, bkt := createBucketWithData(t, chunkenc.ValHistogram, compact.ResolutionLevel5m)
+	tmpDir := t.TempDir()
+	meta, bkt := createBucketWithData(t, chunkenc.ValHistogram, compact.ResolutionLevel5m, tmpDir)
 	defer func() {
 		testutil.Ok(t, bkt.Close())
 	}()
+
+	_, blkChks := downsample.GetMetaAndChunks(t, tmpDir, meta.ULID)
+	chunkr, err := chunks.NewDirReader(filepath.Join(tmpDir, meta.ULID.String(), block.ChunksDirname), downsample.NewPool())
+	testutil.Ok(t, err)
+	defer func() { testutil.Ok(t, chunkr.Close()) }()
+
+	for _, c := range blkChks {
+		_, sum, _ := downsample.GetAggregatorFromChunk(t, chunkr, c)
+		fmt.Println("sum", sum)
+	}
+
 	// crate BucketStore from bucket
 	bucketStore := prepareStoreFromBucket(t, meta, bkt)
 	// create a proxy to wrap the BucketStore
@@ -878,7 +891,7 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		NoopSeriesStatsReporter,
 	)
 
-	_, maxTs := bucketStore.TimeRange()
+	mint, maxt := bucketStore.TimeRange()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -892,16 +905,16 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 
 	testCases := []struct {
 		name  string
-		qry   string
+		qs    string
 		start time.Time
 		end   time.Time
 		want  promql.Matrix
 	}{
 		{
 			name:  "histogram_count",
-			qry:   "histogram_count(test_metric{})",
-			start: time.UnixMilli(maxTs).Add(-44 * time.Hour),
-			end:   time.UnixMilli(maxTs),
+			qs:    "histogram_count(test_metric{})",
+			start: time.UnixMilli(maxt).Add(-44 * time.Hour),
+			end:   time.UnixMilli(maxt),
 			want: promql.Matrix{
 				promql.Series{
 					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0046080aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
@@ -923,9 +936,9 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		},
 		{
 			name:  "histogram_sum",
-			qry:   "histogram_sum(test_metric{})",
-			start: time.UnixMilli(maxTs).Add(-24 * time.Hour),
-			end:   time.UnixMilli(maxTs),
+			qs:    "histogram_sum(test_metric{})",
+			start: time.UnixMilli(mint),
+			end:   time.UnixMilli(maxt),
 			// TODO: check these results, they might not be correct.
 			want: promql.Matrix{
 				promql.Series{
@@ -949,9 +962,9 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		},
 		{
 			name:  "rate",
-			qry:   "rate(test_metric[1m])",
-			start: time.UnixMilli(maxTs).Add(-24 * time.Hour),
-			end:   time.UnixMilli(maxTs),
+			qs:    "rate(test_metric[1m])",
+			start: time.UnixMilli(maxt).Add(-24 * time.Hour),
+			end:   time.UnixMilli(maxt),
 			// TODO: check these results, they might not be correct.
 			want: promql.Matrix{
 				promql.Series{
@@ -981,7 +994,7 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 					// 3 * 15s (scrape interval)
 					LookbackDelta: 3 * 15 * time.Second,
 				},
-				"histogram_count(test_metric{})",
+				tt.qs,
 				tt.start,
 				tt.end,
 				5*time.Minute,
@@ -1052,12 +1065,10 @@ func prepareStoreFromBucket(t testing.TB, meta *metadata.Meta, bkt objstore.Buck
 	return fsStore
 }
 
-func createBucketWithData(b testing.TB, sampleType chunkenc.ValueType, resolutionLevel compact.ResolutionLevel) (*metadata.Meta, objstore.Bucket) {
+func createBucketWithData(b testing.TB, sampleType chunkenc.ValueType, resolutionLevel compact.ResolutionLevel, tmpDir string) (*metadata.Meta, objstore.Bucket) {
 	var (
 		logger = log.NewNopLogger()
 	)
-
-	tmpDir := b.TempDir()
 
 	bkt := objstore.NewInMemBucket()
 	b.Cleanup(func() {

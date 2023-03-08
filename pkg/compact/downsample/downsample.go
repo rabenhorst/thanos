@@ -357,17 +357,18 @@ func (a *histogramAggregator) add(s sample) {
 			a.counter.Add(s.fh)
 			a.resets++
 		} else {
+			// TODO(rabenhorst): Investigate if we can avoid the copy here.
 			// Add delta with previous value to the counter.
 			a.counter.Add(s.fh.Copy().Sub(a.previous))
 		}
 	} else {
 		// First sample sets the counter.
-		a.counter = s.fh
+		a.counter = s.fh.Copy()
 	}
 	a.previous = s.fh
 
 	if a.sum == nil {
-		a.sum = s.fh
+		a.sum = s.fh.Copy()
 	} else {
 		a.sum.Add(s.fh)
 	}
