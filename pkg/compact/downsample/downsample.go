@@ -833,15 +833,15 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 
 	if err := genericAggregate(AggrCount, chks, buf, ab, resolution, mint, maxt, func(a sampleAggregator) float64 {
 		aggr := mustGetAggregator(a)
-		return float64(aggr.count)
+		return aggr.sum
 	}); err != nil {
 		return chk, err
 	}
 
 	*buf = (*buf)[:0]
 	// Expand all samples for the aggregate type.
-	for _, ach := range chks {
-		c, err := ach.Get(AggrSum)
+	for _, achk := range chks {
+		c, err := achk.Get(AggrSum)
 		if err == ErrAggrNotExist {
 			continue
 		} else if err != nil {
@@ -854,8 +854,6 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 	if len(*buf) == 0 {
 		return chk, nil
 	}
-	ab.chunks[AggrSum] = chunkenc.NewFloatHistogramChunk()
-	ab.apps[AggrSum], _ = ab.chunks[AggrSum].Appender()
 
 	downsampleBatch(*buf, resolution, func(t int64, a sampleAggregator) {
 		if t < mint {
@@ -877,8 +875,8 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 		}
 		acs = append(acs, c.Iterator(reuseIt))
 	}
-	*buf = (*buf)[:0]
 
+	*buf = (*buf)[:0]
 	for _, it := range acs {
 		if err := expandFloatHistogramChunkIterator(it, buf); err != nil {
 			return chk, err
@@ -888,8 +886,6 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 			ab.maxt = maxt
 			return ab.encode(), nil
 		}
-		ab.chunks[AggrCounter] = chunkenc.NewFloatHistogramChunk()
-		ab.apps[AggrCounter], _ = ab.chunks[AggrCounter].Appender()
 
 		downsampleBatch(*buf, resolution, func(t int64, a sampleAggregator) {
 			if t < mint {
