@@ -630,19 +630,8 @@ func TestDownsampleAggrAndNonEmptyXORChunks(t *testing.T) {
 
 }
 
-type expectedHistogram struct {
-	counterResetHint histogram.CounterResetHint
-	count            float64
-	sum              float64
-	buckets          []expectedBucket
-}
-
-type expectedBucket struct {
-	upperBound          float64
-	lowerBound          float64
-	count               int64
-	lowerboundInclusive bool
-	upperboundInclusive bool
+type expectedHistogramAggregates struct {
+	count, sum, counter []sample
 }
 
 func TestDownSampleNativeHistogram(t *testing.T) {
@@ -681,14 +670,12 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 			MaxTime: histogramSamples[len(histogramSamples)-1].t,
 		},
 	}
-	id, err := Downsample(logger, fakeMeta, mb, dir, ResLevel1)
+	idResLevel1, err := Downsample(logger, fakeMeta, mb, dir, ResLevel1)
 	testutil.Ok(t, err)
 
-	meta, chks := GetMetaAndChunks(t, dir, id)
+	meta, chks := GetMetaAndChunks(t, dir, idResLevel1)
 
-	expected := []struct {
-		count, sum, counter []sample
-	}{
+	expected := []expectedHistogramAggregates{
 		{
 			count: []sample{
 				{t: 299_999, v: 9}, {t: 599_999, v: 10}, {t: 899_999, v: 10}, {t: 900_000, v: 1},
@@ -732,7 +719,43 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 		},
 	}
 
-	chunkr, err := chunks.NewDirReader(filepath.Join(dir, id.String(), block.ChunksDirname), NewPool())
+	compareAggreggates(t, dir, idResLevel1.String(), expected, chks)
+
+	blk, err := tsdb.OpenBlock(logger, filepath.Join(dir, idResLevel1.String()), NewPool())
+	testutil.Ok(t, err)
+	idResLevel2, err := Downsample(logger, meta, blk, dir, ResLevel2)
+	testutil.Ok(t, err)
+
+	meta, chks = GetMetaAndChunks(t, dir, idResLevel2)
+
+	expected = []expectedHistogramAggregates{
+		{
+			count: []sample{
+				{t: 900_000, v: 30},
+			},
+			counter: []sample{
+				{
+					t:  900_000,
+					fh: generateTestFloatHistogramsCounter(30, histogram.UnknownCounterReset),
+				},
+			},
+			sum: []sample{
+				{
+					t:  900_000,
+					fh: generateTestFloatHistogramsSum(0, 29, histogram.UnknownCounterReset),
+				},
+			},
+		},
+	}
+
+	compareAggreggates(t, dir, idResLevel2.String(), expected, chks)
+
+	_, err = metadata.ReadFromDir(filepath.Join(dir, idResLevel2.String()))
+	testutil.Ok(t, err)
+}
+
+func compareAggreggates(t *testing.T, dir, resLevel string, expected []expectedHistogramAggregates, chks []chunks.Meta) {
+	chunkr, err := chunks.NewDirReader(filepath.Join(dir, resLevel, block.ChunksDirname), NewPool())
 	testutil.Ok(t, err)
 	defer func() { testutil.Ok(t, chunkr.Close()) }()
 
@@ -746,14 +769,6 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 		counter := GetAggregateFromChunk(t, chunkr, c, AggrCounter)
 		testutil.Equals(t, expected[i].counter, counter, "counter mismatch for chunk %d", i)
 	}
-
-	blk, err := tsdb.OpenBlock(logger, filepath.Join(dir, id.String()), NewPool())
-	testutil.Ok(t, err)
-	newId, err := Downsample(logger, meta, blk, dir, ResLevel2)
-	testutil.Ok(t, err)
-
-	_, err = metadata.ReadFromDir(filepath.Join(dir, newId.String()))
-	testutil.Ok(t, err)
 }
 
 func generateTestFloatHistogramsSum(fromIdx, toIdx int, counterResetHint histogram.CounterResetHint) *histogram.FloatHistogram {
