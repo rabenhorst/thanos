@@ -634,6 +634,7 @@ type expectedHistogramAggregates struct {
 	count, sum, counter []sample
 }
 
+// TODO(rabenhorst): Add tests for multi chunk histograms.
 func TestDownSampleNativeHistogram(t *testing.T) {
 	logger := log.NewLogfmtLogger(os.Stderr)
 	dir := t.TempDir()

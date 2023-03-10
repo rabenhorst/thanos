@@ -351,8 +351,10 @@ func (a *histogramAggregator) reset() {
 }
 
 func (a *histogramAggregator) add(s sample) {
+	resetDetected := false
+
 	if a.total > 0 {
-		if detectReset(a.previous, s.fh) {
+		if resetDetected = detectReset(a.previous, s.fh); resetDetected {
 			// Counter reset, correct the value.
 			a.counter.Add(s.fh)
 			a.resets++
@@ -365,13 +367,20 @@ func (a *histogramAggregator) add(s sample) {
 		// First sample sets the counter.
 		a.counter = s.fh.Copy()
 	}
-	a.previous = s.fh
 
-	if a.sum == nil {
+	switch {
+	case a.sum == nil:
 		a.sum = s.fh.Copy()
-	} else {
+	case resetDetected:
+		// Sum must also be adjusted for counter reset, so we can
+		// calculate the correct average (e.g. for histogram_count).
+		a.sum.Add(a.counter)
+	default:
 		a.sum.Add(s.fh)
 	}
+
+	a.previous = s.fh
+
 	a.count++
 	a.total++
 }
