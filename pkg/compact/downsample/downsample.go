@@ -839,7 +839,7 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 	}
 
 	*buf = (*buf)[:0]
-	// Expand all samples for the aggregate type.
+	// Expand all samples for the sum aggregate.
 	for _, achk := range chks {
 		c, err := achk.Get(AggrSum)
 		if err == ErrAggrNotExist {
@@ -864,8 +864,8 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 		ab.apps[AggrSum].AppendFloatHistogram(t, mustGetHistogramAggregator(a).sum)
 	}, true)
 
-	// Handle counters by applying resets directly.
-	acs := make([]chunkenc.Iterator, 0, len(chks))
+	*buf = (*buf)[:0]
+	// Expand all samples for the counter aggregate type.
 	for _, achk := range chks {
 		c, err := achk.Get(AggrCounter)
 		if err == ErrAggrNotExist {
@@ -873,29 +873,20 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 		} else if err != nil {
 			return chk, err
 		}
-		acs = append(acs, c.Iterator(reuseIt))
-	}
-
-	*buf = (*buf)[:0]
-	for _, it := range acs {
-		if err := expandFloatHistogramChunkIterator(it, buf); err != nil {
+		if err := expandFloatHistogramChunkIterator(c.Iterator(reuseIt), buf); err != nil {
 			return chk, err
 		}
-		if len(*buf) == 0 {
-			ab.mint = mint
-			ab.maxt = maxt
-			return ab.encode(), nil
-		}
-
-		downsampleBatch(*buf, resolution, func(t int64, a sampleAggregator) {
-			if t < mint {
-				mint = t
-			} else if t > maxt {
-				maxt = t
-			}
-			ab.apps[AggrCounter].AppendFloatHistogram(t, mustGetHistogramAggregator(a).counter)
-		}, true)
 	}
+
+	downsampleBatch(*buf, resolution, func(t int64, a sampleAggregator) {
+		if t < mint {
+			mint = t
+		} else if t > maxt {
+			maxt = t
+		}
+		ab.apps[AggrCounter].AppendFloatHistogram(t, mustGetHistogramAggregator(a).counter)
+	}, true)
+
 	ab.mint = mint
 	ab.maxt = maxt
 	return ab.encode(), nil
