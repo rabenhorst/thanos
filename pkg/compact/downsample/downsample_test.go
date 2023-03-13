@@ -639,52 +639,44 @@ type expectedHistogramAggregates struct {
 func TestDownSampleNativeHistogram(t *testing.T) {
 	tests := []struct {
 		name               string
-		samples            []sample
+		samples            [][]sample // Samples per chunk.
 		expectedReseLevel1 []expectedHistogramAggregates
 		expectedReseLevel2 []expectedHistogramAggregates
 	}{
 		{
 			"float histogram with 30 samples with counter reset and 30s scrape interval",
-			generateFloatHistogramSamples([]int{15, 15}, 30_000, 0, tsdb.GenerateTestFloatHistograms),
+			generateFloatHistogramSamples(30_000, 0, 15, 15),
 			[]expectedHistogramAggregates{
 				{
 					count: []sample{
-						{t: 299_999, v: 9}, {t: 599_999, v: 10}, {t: 899_999, v: 10}, {t: 900_000, v: 1},
+						{t: 299_999, v: 10}, {t: 599_999, v: 10}, {t: 870_000, v: 10},
 					},
 					counter: []sample{
 						{
 							t:  299_999,
-							fh: expectedFloatHistogramsCounter([]int{9}, histogram.UnknownCounterReset),
+							fh: expectedFloatHistogramsCounter(generateFloatHistograms(10), histogram.UnknownCounterReset),
 						},
 						{
 							t:  599_999,
-							fh: expectedFloatHistogramsCounter([]int{15, 4}, histogram.NotCounterReset),
+							fh: expectedFloatHistogramsCounter(generateFloatHistograms(15, 5), histogram.NotCounterReset),
 						},
 						{
-							t:  899_999,
-							fh: expectedFloatHistogramsCounter([]int{15, 14}, histogram.NotCounterReset),
-						},
-						{
-							t:  900_000,
-							fh: expectedFloatHistogramsCounter([]int{15, 15}, histogram.NotCounterReset),
+							t:  870_000,
+							fh: expectedFloatHistogramsCounter(generateFloatHistograms(15, 15), histogram.NotCounterReset),
 						},
 					},
 					sum: []sample{
 						{
 							t:  299_999,
-							fh: expectedFloatHistogramsSum([]int{9}, 0, histogram.UnknownCounterReset),
+							fh: expectedFloatHistogramsSum(generateFloatHistograms(10), 0, histogram.UnknownCounterReset),
 						},
 						{
 							t:  599_999,
-							fh: expectedFloatHistogramsSum([]int{15, 4}, 9, histogram.NotCounterReset),
+							fh: expectedFloatHistogramsSum(generateFloatHistograms(15, 5), 10, histogram.NotCounterReset),
 						},
 						{
-							t:  899_999,
-							fh: expectedFloatHistogramsSum([]int{15, 14}, 19, histogram.NotCounterReset),
-						},
-						{
-							t:  900_000,
-							fh: expectedFloatHistogramsSum([]int{15, 15}, 29, histogram.NotCounterReset),
+							t:  870_000,
+							fh: expectedFloatHistogramsSum(generateFloatHistograms(15, 15), 20, histogram.NotCounterReset),
 						},
 					},
 				},
@@ -692,18 +684,18 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 			[]expectedHistogramAggregates{
 				{
 					count: []sample{
-						{t: 900_000, v: 30},
+						{t: 870_000, v: 30},
 					},
 					counter: []sample{
 						{
-							t:  900_000,
-							fh: expectedFloatHistogramsCounter([]int{15, 15}, histogram.UnknownCounterReset),
+							t:  870_000,
+							fh: expectedFloatHistogramsCounter(generateFloatHistograms(15, 15), histogram.UnknownCounterReset),
 						},
 					},
 					sum: []sample{
 						{
-							t:  900_000,
-							fh: expectedFloatHistogramsSum([]int{15, 15}, 0, histogram.UnknownCounterReset),
+							t:  870_000,
+							fh: expectedFloatHistogramsSum(generateFloatHistograms(15, 15), 0, histogram.UnknownCounterReset),
 						},
 					},
 				},
@@ -711,47 +703,39 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 		},
 		{
 			"float histogram with 360 samples and 30s scrape interval",
-			generateFloatHistogramSamples([]int{360}, 30_000, 0, tsdb.GenerateTestFloatHistograms),
+			generateFloatHistogramSamples(30_000, 0, 360),
 			[]expectedHistogramAggregates{},
 			[]expectedHistogramAggregates{
 				{
 					count: []sample{
-						{t: 3_599_999, v: 119}, {t: 7_199_999, v: 120}, {t: 10_799_999, v: 120}, {t: 10_800_000, v: 1},
+						{t: 3_599_999, v: 120}, {t: 7_199_999, v: 120}, {t: 10_770_000, v: 120},
 					},
 					counter: []sample{
 						{
 							t:  3_599_999,
-							fh: expectedFloatHistogramsCounter([]int{119}, histogram.UnknownCounterReset),
+							fh: expectedFloatHistogramsCounter(generateFloatHistograms(120), histogram.UnknownCounterReset),
 						},
 						{
 							t:  7_199_999,
-							fh: expectedFloatHistogramsCounter([]int{239}, histogram.NotCounterReset),
+							fh: expectedFloatHistogramsCounter(generateFloatHistograms(240), histogram.NotCounterReset),
 						},
 						{
-							t:  10_799_999,
-							fh: expectedFloatHistogramsCounter([]int{359}, histogram.NotCounterReset),
-						},
-						{
-							t:  10_800_000,
-							fh: expectedFloatHistogramsCounter([]int{360}, histogram.NotCounterReset),
+							t:  10_770_000,
+							fh: expectedFloatHistogramsCounter(generateFloatHistograms(360), histogram.NotCounterReset),
 						},
 					},
 					sum: []sample{
 						{
 							t:  3_599_999,
-							fh: expectedFloatHistogramsSum([]int{119}, 0, histogram.UnknownCounterReset),
+							fh: expectedFloatHistogramsSum(generateFloatHistograms(120), 0, histogram.UnknownCounterReset),
 						},
 						{
 							t:  7_199_999,
-							fh: expectedFloatHistogramsSum([]int{239}, 119, histogram.NotCounterReset),
+							fh: expectedFloatHistogramsSum(generateFloatHistograms(240), 120, histogram.NotCounterReset),
 						},
 						{
-							t:  10_799_999,
-							fh: expectedFloatHistogramsSum([]int{359}, 239, histogram.NotCounterReset),
-						},
-						{
-							t:  10_800_000,
-							fh: expectedFloatHistogramsSum([]int{360}, 359, histogram.NotCounterReset),
+							t:  10_770_000,
+							fh: expectedFloatHistogramsSum(generateFloatHistograms(360), 240, histogram.NotCounterReset),
 						},
 					},
 				},
@@ -765,19 +749,27 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			ser := &series{lset: labels.FromStrings("__name__", "a")}
-			raw := chunkenc.NewFloatHistogramChunk()
-			app, err := raw.Appender()
-			testutil.Ok(t, err)
 
-			for _, hs := range tt.samples {
-				app.AppendFloatHistogram(hs.t, hs.fh)
+			maxt := int64(math.MaxInt64)
+
+			for _, samples := range tt.samples {
+				raw := chunkenc.NewFloatHistogramChunk()
+				app, err := raw.Appender()
+				testutil.Ok(t, err)
+
+				for _, s := range samples {
+					if s.t > maxt {
+						maxt = s.t
+					}
+					app.AppendFloatHistogram(s.t, s.fh)
+				}
+
+				ser.chunks = append(ser.chunks, chunks.Meta{
+					MinTime: math.MaxInt64,
+					MaxTime: math.MinInt64,
+					Chunk:   raw,
+				})
 			}
-
-			ser.chunks = append(ser.chunks, chunks.Meta{
-				MinTime: math.MaxInt64,
-				MaxTime: math.MinInt64,
-				Chunk:   raw,
-			})
 
 			mb := newMemBlock()
 			mb.addSeries(ser)
@@ -785,7 +777,7 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 			fakeMeta := &metadata.Meta{
 				BlockMeta: tsdb.BlockMeta{
 					MinTime: 0,
-					MaxTime: tt.samples[len(tt.samples)-1].t,
+					MaxTime: maxt,
 				},
 			}
 			idResLevel1, err := Downsample(logger, fakeMeta, mb, dir, ResLevel1)
@@ -811,40 +803,54 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 	}
 }
 
-func generateTestFloatHistograms(nWithoutReset []int, generateFloatHistograms func(int) []*histogram.FloatHistogram) []*histogram.FloatHistogram {
-	var floatHistograms []*histogram.FloatHistogram
-	for _, n := range nWithoutReset {
-		floatHistograms = append(floatHistograms, generateFloatHistograms(n)...)
+func flatten[T any](slices ...[]T) []T {
+	var res []T
+	for _, s := range slices {
+		res = append(res, s...)
+	}
+	return res
+}
+
+func generateFloatHistogramSamples(scrapeInterval, startTs int64, n ...int) (floatHistogramSamples [][]sample) {
+	// Generate samples for the float histogram.
+	ts := startTs
+	floatHistograms := generateFloatHistograms(n...)
+	for _, fhs := range floatHistograms {
+		ss := make([]sample, 0, len(fhs))
+		for _, fh := range fhs {
+			ss = append(ss, sample{t: ts, fh: fh})
+			ts += scrapeInterval
+		}
+		floatHistogramSamples = append(floatHistogramSamples, ss)
+	}
+	return
+}
+
+// generateFloatHistograms generates multiple float histograms slices that can be used
+// to simulate counter resets.
+func generateFloatHistograms(n ...int) [][]*histogram.FloatHistogram {
+	var floatHistograms [][]*histogram.FloatHistogram
+	for _, v := range n {
+		floatHistograms = append(floatHistograms, tsdb.GenerateTestFloatHistograms(v))
 	}
 	return floatHistograms
 }
 
-func generateFloatHistogramSamples(nWithoutReset []int, scarepInterval, startTs int64, generateFloatHistograms func(int) []*histogram.FloatHistogram) []sample {
-	// Generate samples for the float histogram.
-	var floatHistogramSamples []sample
-	for i, fh := range generateTestFloatHistograms(nWithoutReset, generateFloatHistograms) {
-		floatHistogramSamples = append(floatHistogramSamples, sample{
-			t:  int64(i+1)*scarepInterval + startTs,
-			fh: fh,
-		})
+func expectedFloatHistogramsSum(floatHistograms [][]*histogram.FloatHistogram, fromIndex int, counterResetHint histogram.CounterResetHint) *histogram.FloatHistogram {
+	fs := flatten(floatHistograms...)
+	sum := fs[fromIndex].Copy()
+	for _, s := range fs[fromIndex+1:] {
+		sum.Add(s)
 	}
-	return floatHistogramSamples
-}
 
-func expectedFloatHistogramsSum(nWithoutReset []int, fromIdx int, counterResetHint histogram.CounterResetHint) *histogram.FloatHistogram {
-	histograms := generateTestFloatHistograms(nWithoutReset, tsdb.GenerateTestFloatHistograms)[fromIdx:]
-	sum := histograms[0]
-	for _, h := range histograms[1:] {
-		sum.Add(h)
-	}
 	sum.CounterResetHint = counterResetHint
 	return sum
 }
 
-func expectedFloatHistogramsCounter(nWithoutReset []int, hint histogram.CounterResetHint) *histogram.FloatHistogram {
-	floatHistograms := generateTestFloatHistograms(nWithoutReset, tsdb.GenerateTestFloatHistograms)
+func expectedFloatHistogramsCounter(floatHistograms [][]*histogram.FloatHistogram, hint histogram.CounterResetHint) *histogram.FloatHistogram {
+	fh := flatten(floatHistograms...)
 	var previous, counter *histogram.FloatHistogram
-	for i, fh := range floatHistograms {
+	for i, fh := range fh {
 		if i == 0 {
 			counter = fh.Copy()
 		} else {
@@ -867,7 +873,7 @@ func compareAggreggates(t *testing.T, dir, blockID string, expected []expectedHi
 	defer func() { testutil.Ok(t, chunkr.Close()) }()
 
 	testUtilWithOps := testutil.WithGoCmp(
-		cmpopts.EquateApprox(0, 1e-10),
+		cmpopts.EquateApprox(0, 1e-9),
 		cmp.AllowUnexported(sample{}),
 	)
 

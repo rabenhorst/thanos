@@ -110,11 +110,11 @@ func Downsample(
 	}
 
 	var (
-		aggrChunks      []*AggrChunk
-		aggrHistoChunks []*AggrChunk
-		chks            []chunks.Meta
-		builder         labels.ScratchBuilder
-		reuseIt         chunkenc.Iterator
+		aggrChunks  []*AggrChunk
+		aggrHChunks []*AggrChunk
+		chks        []chunks.Meta
+		builder     labels.ScratchBuilder
+		reuseIt     chunkenc.Iterator
 	)
 
 	rawSamples := newSamples()
@@ -124,7 +124,7 @@ func Downsample(
 		chks = chks[:0]
 		rawSamples.reset()
 		aggrChunks = aggrChunks[:0]
-		aggrHistoChunks = aggrHistoChunks[:0]
+		aggrHChunks = aggrHChunks[:0]
 
 		// Get series labels and chunks. Downsampled data is sensitive to chunk boundaries
 		// and we need to preserve them to properly downsample previously downsampled data.
@@ -189,7 +189,7 @@ func Downsample(
 				}
 
 				if isHistogram(ac) {
-					aggrHistoChunks = append(aggrHistoChunks, ac)
+					aggrHChunks = append(aggrHChunks, ac)
 				} else {
 					aggrChunks = append(aggrChunks, ac)
 				}
@@ -206,7 +206,7 @@ func Downsample(
 			)
 			all = all[:0]
 			downsampledHistoChunks, err := downsampleAggr(
-				aggrHistoChunks,
+				aggrHChunks,
 				&all,
 				chks[0].MinTime,
 				chks[len(chks)-1].MaxTime,
@@ -380,10 +380,8 @@ func (a *histogramAggregator) add(s sample) {
 
 func detectReset(ch, ph *histogram.FloatHistogram) bool {
 	switch ch.CounterResetHint {
-	// With Prometheus v0.42.0 counter reset hints are not stored in chunks yet.
-	// Default value is NotCounterReset, which means we have to detect the reset.
-	//case histogram.NotCounterReset:
-	//	return false
+	case histogram.NotCounterReset:
+		return false
 	case histogram.CounterReset:
 		return true
 	case histogram.GaugeType:
