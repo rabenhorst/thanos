@@ -351,10 +351,8 @@ func (a *histogramAggregator) reset() {
 }
 
 func (a *histogramAggregator) add(s sample) {
-	resetDetected := false
-
 	if a.total > 0 {
-		if resetDetected = detectReset(a.previous, s.fh); resetDetected {
+		if detectReset(s.fh, a.previous) {
 			// Counter reset, correct the value.
 			a.counter.Add(s.fh)
 			a.resets++
@@ -371,13 +369,7 @@ func (a *histogramAggregator) add(s sample) {
 	if a.sum == nil {
 		a.sum = s.fh.Copy()
 	} else {
-		if resetDetected {
-			// Sum must be adjusted for counter reset, so we can
-			// calculate the correct average (e.g. for histogram_count).
-			a.sum.Add(a.counter)
-		} else {
-			a.sum.Add(s.fh)
-		}
+		a.sum.Add(s.fh)
 	}
 
 	a.previous = s.fh
@@ -386,10 +378,12 @@ func (a *histogramAggregator) add(s sample) {
 	a.total++
 }
 
-func detectReset(ph, ch *histogram.FloatHistogram) bool {
-	switch ph.CounterResetHint {
-	case histogram.NotCounterReset:
-		return false
+func detectReset(ch, ph *histogram.FloatHistogram) bool {
+	switch ch.CounterResetHint {
+	// With Prometheus v0.42.0 counter reset hints are not stored in chunks yet.
+	// Default value is NotCounterReset, which means we have to detect the reset.
+	//case histogram.NotCounterReset:
+	//	return false
 	case histogram.CounterReset:
 		return true
 	case histogram.GaugeType:
