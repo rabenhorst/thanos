@@ -1132,8 +1132,10 @@ func chunkToStoreEncoding(in chunkenc.Encoding) storepb.Chunk_Encoding {
 	switch in {
 	case chunkenc.EncXOR:
 		return storepb.Chunk_XOR
-	case chunkenc.EncHistogram, chunkenc.EncFloatHistogram:
+	case chunkenc.EncHistogram:
 		return storepb.Chunk_HISTOGRAM
+	case chunkenc.EncFloatHistogram:
+		return storepb.Chunk_FLOAT_HISTOGRAM
 	default:
 		panic("unknown chunk encoding")
 	}
