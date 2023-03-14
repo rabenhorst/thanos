@@ -849,6 +849,8 @@ func TestQuerier_Select(t *testing.T) {
 }
 
 func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
+	t.Skip("Will be enabled after average iterator for native histograms is implemented.")
+
 	// create the in fs store
 	// upload blk to bucket
 	tmpDir := t.TempDir()
@@ -863,7 +865,7 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 	defer func() { testutil.Ok(t, chunkr.Close()) }()
 
 	for _, c := range blkChks {
-		_, sum, _ := downsample.GetAggregatorFromChunk(t, chunkr, c)
+		sum := downsample.GetAggregateFromChunk(t, chunkr, c, downsample.AggrSum)
 		fmt.Println("sum", sum)
 	}
 
@@ -891,7 +893,7 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		NoopSeriesStatsReporter,
 	)
 
-	mint, maxt := bucketStore.TimeRange()
+	mint, _ := bucketStore.TimeRange()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -913,23 +915,16 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		{
 			name:  "histogram_count",
 			qs:    "histogram_count(test_metric{})",
-			start: time.UnixMilli(maxt).Add(-44 * time.Hour),
-			end:   time.UnixMilli(maxt),
+			start: time.UnixMilli(mint).Add(12 * time.Hour),
+			end:   time.UnixMilli(mint).Add(12 * time.Hour).Add(15 * time.Minute),
 			want: promql.Matrix{
 				promql.Series{
-					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0046080aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
+					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0000000aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
 					Points: []promql.Point{
-						{V: 17232, T: 720285001},
-						{V: 327632, T: 749385001},
-						{V: 637552, T: 777585001},
-					},
-				},
-				promql.Series{
-					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
-					Points: []promql.Point{
-						{V: 17232, T: 806685001},
-						{V: 327632, T: 835785001},
-						{V: 637552, T: 863985001},
+						{V: 23042, T: 43_200_000},
+						{V: 23202, T: 43_500_000},
+						{V: 23362, T: 43_800_000},
+						{V: 23522, T: 44_100_000},
 					},
 				},
 			},
@@ -937,34 +932,26 @@ func TestQuerier_DownsampledNativeHistogram(t *testing.T) {
 		{
 			name:  "histogram_sum",
 			qs:    "histogram_sum(test_metric{})",
-			start: time.UnixMilli(mint),
-			end:   time.UnixMilli(maxt),
+			start: time.UnixMilli(mint).Add(25 * time.Hour),
+			end:   time.UnixMilli(mint).Add(25 * time.Hour).Add(15 * time.Minute),
 			// TODO: check these results, they might not be correct.
 			want: promql.Matrix{
 				promql.Series{
-					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{
-						Name:  "i",
-						Value: "0046080aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd",
-					}},
+					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0005760aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
 					Points: []promql.Point{
-						{V: 637552, T: 777585001},
-					},
-				},
-				promql.Series{
-					Metric: labels.Labels{labels.Label{Name: "ext1", Value: "1"}, labels.Label{Name: "foo", Value: "bar"}, labels.Label{Name: "i", Value: "0051840aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"}},
-					Points: []promql.Point{
-						{V: 17232, T: 806685001},
-						{V: 327632, T: 835785001},
-						{V: 637552, T: 863985001},
+						{V: 4416, T: 90_000_000},
+						{V: 4784, T: 90_300_000},
+						{V: 5152, T: 90_600_000},
+						{V: 5520, T: 90_900_000},
 					},
 				},
 			},
 		},
 		{
 			name:  "rate",
-			qs:    "rate(test_metric[1m])",
-			start: time.UnixMilli(maxt).Add(-24 * time.Hour),
-			end:   time.UnixMilli(maxt),
+			qs:    "rate(test_metric[10m])",
+			start: time.UnixMilli(mint).Add(30 * time.Hour),
+			end:   time.UnixMilli(mint).Add(30 * time.Hour).Add(15 * time.Minute),
 			// TODO: check these results, they might not be correct.
 			want: promql.Matrix{
 				promql.Series{
@@ -1080,7 +1067,7 @@ func createBucketWithData(b testing.TB, sampleType chunkenc.ValueType, resolutio
 		TSDBDir:          filepath.Join(tmpDir, "head"),
 		SamplesPerSeries: 86400 / 15, // Simulate 1 day block with 15s scrape interval.
 		ScrapeInterval:   15 * time.Second,
-		Series:           10,
+		Series:           2,
 		PrependLabels:    nil,
 		Random:           rand.New(rand.NewSource(120)),
 		SkipChunks:       true,

@@ -1202,22 +1202,22 @@ func TestSamplesFromTSDBSamples(t *testing.T) {
 
 		input []tsdbutil.Sample
 
-		expected []sample
+		expected samples
 	}{
 		{
 			name:     "empty",
 			input:    []tsdbutil.Sample{},
-			expected: []sample{},
+			expected: samples{floatSamples: []sample{}},
 		},
 		{
 			name:     "one sample",
 			input:    []tsdbutil.Sample{testSample{1, 1}},
-			expected: []sample{{t: 1, v: 1}},
+			expected: samples{floatSamples: []sample{{t: 1, v: 1}}},
 		},
 		{
 			name:     "multiple samples",
 			input:    []tsdbutil.Sample{testSample{1, 1}, testSample{2, 2}, testSample{3, 3}, testSample{4, 4}, testSample{5, 5}},
-			expected: []sample{{t: 1, v: 1}, {t: 2, v: 2}, {t: 3, v: 3}, {t: 4, v: 4}, {t: 5, v: 5}},
+			expected: samples{floatSamples: []sample{{t: 1, v: 1}, {t: 2, v: 2}, {t: 3, v: 3}, {t: 4, v: 4}, {t: 5, v: 5}}},
 		},
 	} {
 		t.Run(tcase.name, func(t *testing.T) {
