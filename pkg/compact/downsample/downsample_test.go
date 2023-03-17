@@ -4,6 +4,12 @@
 package downsample
 
 import (
+	"math"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+
 	"github.com/go-kit/log"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -19,11 +25,6 @@ import (
 	"github.com/prometheus/prometheus/tsdb/tombstones"
 	"github.com/prometheus/prometheus/tsdb/tsdbutil"
 	"go.uber.org/goleak"
-	"math"
-	"os"
-	"path/filepath"
-	"sort"
-	"testing"
 
 	"github.com/efficientgo/core/testutil"
 
@@ -142,7 +143,7 @@ func TestDownsampleCounterBoundaryReset(t *testing.T) {
 		testutil.Equals(t, test.rawCounterIterate, counterIterate(t, rawAggrChunks))
 
 		var buf []sample
-		acm, err := downsampleAggrLoop(rawAggrChunks, &buf, test.aggrAggrResolution, test.aggrChunks, false)
+		acm, err := downsampleAggrLoop(rawAggrChunks, &buf, test.aggrAggrResolution, test.aggrChunks, downsampleAggrBatch)
 		testutil.Ok(t, err)
 		testutil.Equals(t, test.aggrChunks, len(acm))
 

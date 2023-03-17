@@ -110,21 +110,19 @@ func Downsample(
 	}
 
 	var (
-		aggrChunks  []*AggrChunk
-		aggrHChunks []*AggrChunk
-		chks        []chunks.Meta
-		builder     labels.ScratchBuilder
-		reuseIt     chunkenc.Iterator
+		aggrChunks []*AggrChunk
+		chks       []chunks.Meta
+		builder    labels.ScratchBuilder
+		reuseIt    chunkenc.Iterator
 	)
 
 	rawSamples := newSamples()
-	all := rawSamples.floatSamples
+	buf := rawSamples.floatSamples
 
 	for postings.Next() {
 		chks = chks[:0]
 		rawSamples.reset()
 		aggrChunks = aggrChunks[:0]
-		aggrHChunks = aggrHChunks[:0]
 
 		// Get series labels and chunks. Downsampled data is sensitive to chunk boundaries
 		// and we need to preserve them to properly downsample previously downsampled data.
@@ -188,33 +186,17 @@ func Downsample(
 
 				}
 
-				if isHistogram(ac) {
-					aggrHChunks = append(aggrHChunks, ac)
-				} else {
-					aggrChunks = append(aggrChunks, ac)
-				}
+				aggrChunks = append(aggrChunks, ac)
 			}
 
 			downsampledChunks, err := downsampleAggr(
 				aggrChunks,
-				&all,
+				&buf,
 				chks[0].MinTime,
 				chks[len(chks)-1].MaxTime,
 				origMeta.Thanos.Downsample.Resolution,
 				resolution,
-				false,
 			)
-			all = all[:0]
-			downsampledHistoChunks, err := downsampleAggr(
-				aggrHChunks,
-				&all,
-				chks[0].MinTime,
-				chks[len(chks)-1].MaxTime,
-				origMeta.Thanos.Downsample.Resolution,
-				resolution,
-				true,
-			)
-			downsampledChunks = append(downsampledChunks, downsampledHistoChunks...)
 			if err != nil {
 				return id, errors.Wrapf(err, "downsample aggregate block, series: %d", postings.At())
 			}
@@ -612,18 +594,36 @@ func downsampleAggr(
 	chks []*AggrChunk,
 	buf *[]sample,
 	mint, maxt, inRes, outRes int64,
-	isHistogram bool,
 ) ([]chunks.Meta, error) {
-	var numSamples int
-	for _, c := range chks {
-		numSamples += c.NumSamples()
-	}
-	numChunks := targetChunkCount(mint, maxt, inRes, outRes, numSamples)
+	var fChks, hChks []*AggrChunk
+	var fNumSamples, hNumSamples int
 
-	return downsampleAggrLoop(chks, buf, outRes, numChunks, isHistogram)
+	for _, c := range chks {
+		if isHistogram(c) {
+			hChks = append(hChks, c)
+			hNumSamples += c.NumSamples()
+			continue
+		}
+		fChks = append(fChks, c)
+		fNumSamples += c.NumSamples()
+	}
+
+	if len(fChks) > 0 {
+		numChunksF := targetChunkCount(mint, maxt, inRes, outRes, fNumSamples)
+		return downsampleAggrLoop(fChks, buf, outRes, numChunksF, downsampleAggrBatch)
+	}
+
+	numChunksH := targetChunkCount(mint, maxt, inRes, outRes, hNumSamples)
+	return downsampleAggrLoop(hChks, buf, outRes, numChunksH, downsampleHistogramAggrBatch)
 }
 
-func downsampleAggrLoop(chks []*AggrChunk, buf *[]sample, resolution int64, numChunks int, isHistogram bool) ([]chunks.Meta, error) {
+func downsampleAggrLoop(
+	chks []*AggrChunk,
+	buf *[]sample,
+	resolution int64,
+	numChunks int,
+	downsampleAggr func(chks []*AggrChunk, buf *[]sample, resolution int64) (chk chunks.Meta, err error),
+) ([]chunks.Meta, error) {
 	// We downsample aggregates only along chunk boundaries. This is required
 	// for counters to be downsampled correctly since a chunk's first and last
 	// counter values are the true values of the original series. We need
@@ -639,15 +639,7 @@ func downsampleAggrLoop(chks []*AggrChunk, buf *[]sample, resolution int64, numC
 		part := chks[:j]
 		chks = chks[j:]
 
-		var (
-			err error
-			chk chunks.Meta
-		)
-		if isHistogram {
-			chk, err = downsampleHistogramAggrBatch(part, buf, resolution)
-		} else {
-			chk, err = downsampleAggrBatch(part, buf, resolution)
-		}
+		chk, err := downsampleAggr(part, buf, resolution)
 		if err != nil {
 			return nil, err
 		}
