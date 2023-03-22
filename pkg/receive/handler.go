@@ -420,24 +420,24 @@ func (h *Handler) flushTenant(w http.ResponseWriter, r *http.Request) {
 	tenantID := r.Header.Get(h.options.TenantHeader)
 	if tenantID == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf("%s header is required", h.options.TenantHeader)))
+		_, _ = w.Write([]byte(fmt.Sprintf("%s header is required", h.options.TenantHeader)))
 		return
 	}
 
 	if err := h.isTenantValid(tenantID); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
+		_, _ = w.Write([]byte(err.Error()))
 		return
 	}
 
 	if err := h.writer.multiTSDB.FlushTenant(tenantID); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
+		_, _ = w.Write([]byte(err.Error()))
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Successfully flushed tenant " + tenantID))
+	_, _ = w.Write([]byte("Successfully flushed tenant " + tenantID))
 }
 
 func (h *Handler) receiveHTTP(w http.ResponseWriter, r *http.Request) {

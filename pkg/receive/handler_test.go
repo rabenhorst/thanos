@@ -61,6 +61,8 @@ func (t *fakeTenantAppendable) TenantAppendable(_ string) (Appendable, error) {
 	return t.f, nil
 }
 
+func (t *fakeTenantAppendable) FlushTenant(_ string) error { return nil }
+
 type fakeAppendable struct {
 	appender    storage.Appender
 	appenderErr func() error
