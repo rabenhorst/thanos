@@ -424,6 +424,12 @@ func (h *Handler) flushTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.isTenantValid(tenantID); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
 	if err := h.writer.multiTSDB.FlushTenant(tenantID); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
