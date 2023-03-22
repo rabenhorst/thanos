@@ -297,6 +297,25 @@ func (t *MultiTSDB) Flush() error {
 	return merr.Err()
 }
 
+func (t *MultiTSDB) FlushTenant(tenantID string) error {
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
+
+	tenant, ok := t.tenants[tenantID]
+	if !ok {
+		return errors.Errorf("flushing TSDB for tenant %s failed; not found", tenantID)
+	}
+
+	db := tenant.readyStorage().Get()
+	if db == nil {
+		return errors.Errorf("flushing TSDB for tenant %s failed; not ready", tenantID)
+	}
+
+	level.Info(t.logger).Log("msg", "flushing TSDB", "tenant", tenantID)
+	head := db.Head()
+	return db.CompactHead(tsdb.NewRangeHead(head, head.MinTime(), head.MaxTime()))
+}
+
 func (t *MultiTSDB) Close() error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
