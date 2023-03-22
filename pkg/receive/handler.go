@@ -235,6 +235,7 @@ func NewHandler(logger log.Logger, o *Options) *Handler {
 			),
 		),
 	)
+	h.router.Post("/api/v1/flush", readyf(h.flushTenant))
 
 	statusAPI := statusapi.New(statusapi.Options{
 		GetStats: h.getStats,
@@ -413,6 +414,30 @@ func (h *Handler) isTenantValid(tenant string) error {
 		return errors.New("Tenant name not valid")
 	}
 	return nil
+}
+
+func (h *Handler) flushTenant(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.Header.Get(h.options.TenantHeader)
+	if tenantID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(fmt.Sprintf("%s header is required", h.options.TenantHeader)))
+		return
+	}
+
+	if err := h.isTenantValid(tenantID); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(err.Error()))
+		return
+	}
+
+	if err := h.writer.multiTSDB.FlushTenant(tenantID); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(err.Error()))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("Successfully flushed tenant " + tenantID))
 }
 
 func (h *Handler) receiveHTTP(w http.ResponseWriter, r *http.Request) {

@@ -24,6 +24,7 @@ type Appendable interface {
 
 type TenantStorage interface {
 	TenantAppendable(string) (Appendable, error)
+	FlushTenant(string) error
 }
 
 type Writer struct {
