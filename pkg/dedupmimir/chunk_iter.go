@@ -150,8 +150,10 @@ func (h *chunkIteratorHeap) Pop() interface{} {
 }
 
 type overlappingMerger struct {
-	xorIterators  []chunkenc.Iterator
-	aggrIterators [5][]chunkenc.Iterator
+	xorIterators            []chunkenc.Iterator
+	histogramIterators      []chunkenc.Iterator
+	floatHistogramIterators []chunkenc.Iterator
+	aggrIterators           [5][]chunkenc.Iterator
 
 	samplesMergeFunc func(a, b chunkenc.Iterator) chunkenc.Iterator
 }
@@ -169,6 +171,11 @@ func (o *overlappingMerger) addChunk(chk chunks.Meta) {
 	switch chk.Chunk.Encoding() {
 	case chunkenc.EncXOR:
 		o.xorIterators = append(o.xorIterators, chk.Chunk.Iterator(nil))
+	// TODO(rabenhorst): Copy this to dedup pkg.
+	case chunkenc.EncHistogram:
+		o.histogramIterators = append(o.histogramIterators, chk.Chunk.Iterator(nil))
+	case chunkenc.EncFloatHistogram:
+		o.floatHistogramIterators = append(o.floatHistogramIterators, chk.Chunk.Iterator(nil))
 	case downsample.ChunkEncAggr:
 		aggrChk := chk.Chunk.(*downsample.AggrChunk)
 		for i := downsample.AggrCount; i <= downsample.AggrCounter; i++ {
@@ -182,7 +189,7 @@ func (o *overlappingMerger) addChunk(chk chunks.Meta) {
 func (o *overlappingMerger) empty() bool {
 	// OverlappingMerger only contains either xor chunk or aggr chunk.
 	// If xor chunks are present then we don't need to check aggr chunks.
-	if len(o.xorIterators) > 0 {
+	if len(o.xorIterators) > 0 || len(o.histogramIterators) > 0 || len(o.floatHistogramIterators) > 0 {
 		return false
 	}
 	return len(o.aggrIterators[downsample.AggrCount]) == 0
@@ -198,6 +205,29 @@ func (o *overlappingMerger) iterator(baseChk chunks.Meta) chunks.Iterator {
 			SampleIteratorFn: func(_ chunkenc.Iterator) chunkenc.Iterator {
 				it = baseChk.Chunk.Iterator(nil)
 				for _, i := range o.xorIterators {
+					it = o.samplesMergeFunc(it, i)
+				}
+				return it
+			}}).Iterator(nil)
+
+	// TODO(rabenhorst): Copy this to dedup pkg.
+	case chunkenc.EncHistogram:
+		// If Histogram encoding, we need to deduplicate the samples and re-encode them to chunks.
+		return storage.NewSeriesToChunkEncoder(&storage.SeriesEntry{
+			SampleIteratorFn: func(_ chunkenc.Iterator) chunkenc.Iterator {
+				it = baseChk.Chunk.Iterator(nil)
+				for _, i := range o.histogramIterators {
+					it = o.samplesMergeFunc(it, i)
+				}
+				return it
+			}}).Iterator(nil)
+
+	case chunkenc.EncFloatHistogram:
+		// If FloatHistogram encoding, we need to deduplicate the samples and re-encode them to chunks.
+		return storage.NewSeriesToChunkEncoder(&storage.SeriesEntry{
+			SampleIteratorFn: func(_ chunkenc.Iterator) chunkenc.Iterator {
+				it = baseChk.Chunk.Iterator(nil)
+				for _, i := range o.floatHistogramIterators {
 					it = o.samplesMergeFunc(it, i)
 				}
 				return it

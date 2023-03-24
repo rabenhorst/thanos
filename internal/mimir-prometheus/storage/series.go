@@ -19,10 +19,12 @@ import (
 	"sort"
 
 	"github.com/prometheus/prometheus/model/histogram"
+
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/model/labels"
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb/chunkenc"
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb/chunks"
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb/tsdbutil"
+	"github.com/thanos-io/thanos/internal/mimir-prometheus/utils"
 )
 
 type SeriesEntry struct {
@@ -281,7 +283,7 @@ func NewSeriesToChunkEncoder(series Series) ChunkSeries {
 func (s *seriesToChunkEncoder) Iterator(it chunks.Iterator) chunks.Iterator {
 	var (
 		chk chunkenc.Chunk
-		app chunkenc.Appender
+		app *utils.RecodingAppender
 		err error
 	)
 	mint := int64(math.MaxInt64)
@@ -299,21 +301,16 @@ func (s *seriesToChunkEncoder) Iterator(it chunks.Iterator) chunks.Iterator {
 	for typ := seriesIter.Next(); typ != chunkenc.ValNone; typ = seriesIter.Next() {
 		if typ != lastType || i >= seriesToChunkEncoderSplit {
 			// Create a new chunk if the sample type changed or too many samples in the current one.
-			if chk != nil {
-				chks = append(chks, chunks.Meta{
-					MinTime: mint,
-					MaxTime: maxt,
-					Chunk:   chk,
-				})
-			}
+			chks = appendChunk(chks, mint, maxt, chk)
 			chk, err = chunkenc.NewEmptyChunk(typ.ChunkEncoding())
 			if err != nil {
 				return errChunksIterator{err: err}
 			}
-			app, err = chk.Appender()
+			chkAppender, err := chk.Appender()
 			if err != nil {
 				return errChunksIterator{err: err}
 			}
+			app = utils.NewRecodingAppender(&chk, chkAppender)
 			mint = int64(math.MaxInt64)
 			// maxt is immediately overwritten below which is why setting it here won't make a difference.
 			i = 0
@@ -332,10 +329,37 @@ func (s *seriesToChunkEncoder) Iterator(it chunks.Iterator) chunks.Iterator {
 			app.Append(t, v)
 		case chunkenc.ValHistogram:
 			t, h = seriesIter.AtHistogram()
-			app.AppendHistogram(t, h)
+			ok := app.AppendHistogram(t, h)
+			if !ok {
+				chks = appendChunk(chks, mint, maxt, chk)
+				chk = chunkenc.NewHistogramChunk()
+				chkAppender, err := chk.Appender()
+				if err != nil {
+					return errChunksIterator{err: err}
+				}
+				mint = int64(math.MaxInt64)
+				i = 0
+				app = utils.NewRecodingAppender(&chk, chkAppender)
+				if ok := app.AppendHistogram(t, h); !ok {
+					panic("unexpected error while appending histogram")
+				}
+			}
 		case chunkenc.ValFloatHistogram:
 			t, fh = seriesIter.AtFloatHistogram()
-			app.AppendFloatHistogram(t, fh)
+			if ok := app.AppendFloatHistogram(t, fh); !ok {
+				chks = appendChunk(chks, mint, maxt, chk)
+				chk = chunkenc.NewFloatHistogramChunk()
+				chkAppender, err := chk.Appender()
+				if err != nil {
+					return errChunksIterator{err: err}
+				}
+				mint = int64(math.MaxInt64)
+				i = 0
+				app = utils.NewRecodingAppender(&chk, chkAppender)
+				if ok := app.AppendFloatHistogram(t, fh); !ok {
+					panic("unexpected error while appending histogram")
+				}
+			}
 		default:
 			return errChunksIterator{err: fmt.Errorf("unknown sample type %s", typ.String())}
 		}
@@ -363,6 +387,17 @@ func (s *seriesToChunkEncoder) Iterator(it chunks.Iterator) chunks.Iterator {
 		return lcsi
 	}
 	return NewListChunkSeriesIterator(chks...)
+}
+
+func appendChunk(chks []chunks.Meta, mint int64, maxt int64, chk chunkenc.Chunk) []chunks.Meta {
+	if chk != nil {
+		chks = append(chks, chunks.Meta{
+			MinTime: mint,
+			MaxTime: maxt,
+			Chunk:   chk,
+		})
+	}
+	return chks
 }
 
 type errChunksIterator struct {
