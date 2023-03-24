@@ -14,7 +14,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/value"
-	prom_tsdb "github.com/prometheus/prometheus/tsdb"
+
+	"go.uber.org/goleak"
+
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/model/labels"
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/storage"
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb"
@@ -23,9 +25,9 @@ import (
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb/index"
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb/tombstones"
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb/tsdbutil"
-	"go.uber.org/goleak"
 
 	"github.com/efficientgo/core/testutil"
+
 	"github.com/thanos-io/thanos/pkg/block"
 	"github.com/thanos-io/thanos/pkg/block/metadata"
 )
@@ -740,7 +742,7 @@ func TestApplyCounterResetsIterator(t *testing.T) {
 func TestApplyCounterResetsIteratorHistograms(t *testing.T) {
 	const lenChunks, lenChunk = 4, 10
 
-	histograms := prom_tsdb.GenerateTestHistograms(lenChunks * lenChunk)
+	histograms := tsdbutil.GenerateTestHistograms(lenChunks * lenChunk)
 
 	var chunks [][]*histogramPair
 	for i := 0; i < lenChunks; i++ {
