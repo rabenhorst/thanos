@@ -696,7 +696,7 @@ func runQuery(
 		queryEngine = promql.NewEngine(engineOpts)
 	case promqlEngineThanos:
 		if queryMode == queryModeLocal {
-			queryEngine = engine.New(engine.Opts{EngineOpts: engineOpts, LogicalOptimizers: logicalOptimizers})
+			queryEngine = engine.New(engine.Opts{EngineOpts: engineOpts, EnableXFunctions: true, LogicalOptimizers: logicalOptimizers})
 		} else {
 			remoteEngineEndpoints := query.NewRemoteEndpoints(logger, endpoints.GetQueryAPIClients, query.Opts{
 				AutoDownsample:        enableAutodownsampling,
@@ -704,7 +704,7 @@ func runQuery(
 				Timeout:               queryTimeout,
 				EnablePartialResponse: enableQueryPartialResponse,
 			})
-			queryEngine = engine.NewDistributedEngine(engine.Opts{EngineOpts: engineOpts}, remoteEngineEndpoints)
+			queryEngine = engine.NewDistributedEngine(engine.Opts{EngineOpts: engineOpts, EnableXFunctions: true}, remoteEngineEndpoints)
 		}
 	default:
 		return errors.Errorf("unknown query.promql-engine type %v", promqlEngine)
