@@ -1100,7 +1100,7 @@ func uploadTestBlock(t testing.TB, tmpDir string, bkt objstore.Bucket, series in
 	appendTestData(t, h.Appender(context.Background()), series)
 
 	testutil.Ok(t, os.MkdirAll(filepath.Join(tmpDir, "tmp"), os.ModePerm))
-	id := createBlockFromHead(t, filepath.Join(tmpDir, "tmp"), h)
+	id := storetestutil.CreateBlockFromHead(t, filepath.Join(tmpDir, "tmp"), h)
 
 	_, err = metadata.InjectThanos(log.NewNopLogger(), filepath.Join(tmpDir, "tmp", id.String()), metadata.Thanos{
 		Labels:     labels.Labels{{Name: "ext1", Value: "1"}}.Map(),
@@ -1134,20 +1134,6 @@ func appendTestData(t testing.TB, app storage.Appender, series int) {
 		}
 	}
 	testutil.Ok(t, app.Commit())
-}
-
-func createBlockFromHead(t testing.TB, dir string, head *tsdb.Head) ulid.ULID {
-	// TODO(rabenhorst) Test with sharded compactor.
-	compactor, err := tsdb.NewLeveledCompactor(context.Background(), nil, log.NewNopLogger(), []int64{1000000}, nil, nil)
-	testutil.Ok(t, err)
-
-	testutil.Ok(t, os.MkdirAll(dir, 0777))
-
-	// Add +1 millisecond to block maxt because block intervals are half-open: [b.MinTime, b.MaxTime).
-	// Because of this block intervals are always +1 than the total samples it includes.
-	ulid, err := compactor.Write(dir, head, head.MinTime(), head.MaxTime()+1, nil)
-	testutil.Ok(t, err)
-	return ulid
 }
 
 // Very similar benchmark to ths: https://github.com/prometheus/prometheus/blob/1d1732bc25cc4b47f513cb98009a4eb91879f175/tsdb/querier_bench_test.go#L82,
@@ -1321,7 +1307,7 @@ func benchBucketSeries(t testutil.TB, sampleType chunkenc.ValueType, skipChunk b
 			SkipChunks:       t.IsBenchmark() || skipChunk,
 			SampleType:       sampleType,
 		})
-		id := createBlockFromHead(t, blockDir, head)
+		id := storetestutil.CreateBlockFromHead(t, blockDir, head)
 		testutil.Ok(t, head.Close())
 
 		// Histogram chunks are represented differently in memory and on disk. In order to
@@ -1499,7 +1485,7 @@ func TestBucketSeries_OneBlock_InMemIndexCacheSegfault(t *testing.T) {
 		testutil.Ok(t, app.Commit())
 
 		blockDir := filepath.Join(tmpDir, "tmp")
-		id := createBlockFromHead(t, blockDir, h)
+		id := storetestutil.CreateBlockFromHead(t, blockDir, h)
 
 		meta, err := metadata.InjectThanos(log.NewNopLogger(), filepath.Join(blockDir, id.String()), thanosMeta, nil)
 		testutil.Ok(t, err)
@@ -1538,7 +1524,7 @@ func TestBucketSeries_OneBlock_InMemIndexCacheSegfault(t *testing.T) {
 		testutil.Ok(t, app.Commit())
 
 		blockDir := filepath.Join(tmpDir, "tmp2")
-		id := createBlockFromHead(t, blockDir, h)
+		id := storetestutil.CreateBlockFromHead(t, blockDir, h)
 
 		meta, err := metadata.InjectThanos(log.NewNopLogger(), filepath.Join(blockDir, id.String()), thanosMeta, nil)
 		testutil.Ok(t, err)
@@ -1779,7 +1765,7 @@ func TestSeries_BlockWithMultipleChunks(t *testing.T) {
 		testutil.Ok(t, app.Commit())
 	}
 
-	blk := createBlockFromHead(t, headOpts.ChunkDirRoot, h)
+	blk := storetestutil.CreateBlockFromHead(t, headOpts.ChunkDirRoot, h)
 
 	thanosMeta := metadata.Thanos{
 		Labels:     labels.Labels{{Name: "ext1", Value: "1"}}.Map(),
@@ -2030,7 +2016,7 @@ func uploadSeriesToBucket(t *testing.T, bkt *filesystem.Bucket, replica string, 
 		}
 	}
 
-	blk := createBlockFromHead(t, headOpts.ChunkDirRoot, h)
+	blk := storetestutil.CreateBlockFromHead(t, headOpts.ChunkDirRoot, h)
 
 	thanosMeta := metadata.Thanos{
 		Labels:     labels.Labels{{Name: "ext1", Value: replica}}.Map(),
@@ -2092,7 +2078,7 @@ func createBlockWithOneSeriesWithStep(t testutil.TB, dir string, lbls labels.Lab
 	}
 	testutil.Ok(t, app.Commit())
 
-	return createBlockFromHead(t, dir, h)
+	return storetestutil.CreateBlockFromHead(t, dir, h)
 }
 
 func setupStoreForHintsTest(t *testing.T) (testutil.TB, *BucketStore, []*storepb.Series, []*storepb.Series, ulid.ULID, ulid.ULID, func()) {
@@ -2129,7 +2115,7 @@ func setupStoreForHintsTest(t *testing.T) (testutil.TB, *BucketStore, []*storepb
 		PrependLabels:    extLset,
 		Random:           random,
 	})
-	block1 := createBlockFromHead(t, bktDir, head)
+	block1 := storetestutil.CreateBlockFromHead(t, bktDir, head)
 	testutil.Ok(t, head.Close())
 	head2, seriesSet2 := storetestutil.CreateHeadWithSeries(t, 1, storetestutil.HeadGenOptions{
 		TSDBDir:          filepath.Join(tmpDir, "1"),
@@ -2138,7 +2124,7 @@ func setupStoreForHintsTest(t *testing.T) (testutil.TB, *BucketStore, []*storepb
 		PrependLabels:    extLset,
 		Random:           random,
 	})
-	block2 := createBlockFromHead(t, bktDir, head2)
+	block2 := storetestutil.CreateBlockFromHead(t, bktDir, head2)
 	testutil.Ok(t, head2.Close())
 
 	for _, blockID := range []ulid.ULID{block1, block2} {
@@ -2341,7 +2327,7 @@ func TestSeries_ChunksHaveHashRepresentation(t *testing.T) {
 	}
 	testutil.Ok(t, app.Commit())
 
-	blk := createBlockFromHead(t, headOpts.ChunkDirRoot, h)
+	blk := storetestutil.CreateBlockFromHead(t, headOpts.ChunkDirRoot, h)
 
 	thanosMeta := metadata.Thanos{
 		Labels:     labels.Labels{{Name: "ext1", Value: "1"}}.Map(),
@@ -2505,7 +2491,7 @@ func BenchmarkBucketBlock_readChunkRange(b *testing.B) {
 }
 
 func BenchmarkBlockSeries(b *testing.B) {
-	blk, blockMeta := prepareBucket(b, compact.ResolutionLevelRaw)
+	blk, blockMeta := prepareBucket(b, compact.ResolutionLevelRaw, chunkenc.ValFloat)
 
 	aggrs := []storepb.Aggr{storepb.Aggr_RAW}
 	for _, concurrency := range []int{1, 2, 4, 8, 16, 32} {
@@ -2515,7 +2501,7 @@ func BenchmarkBlockSeries(b *testing.B) {
 	}
 }
 
-func prepareBucket(b *testing.B, resolutionLevel compact.ResolutionLevel) (*bucketBlock, *metadata.Meta) {
+func prepareBucket(b testing.TB, resolutionLevel compact.ResolutionLevel, sampleType chunkenc.ValueType) (*bucketBlock, *metadata.Meta) {
 	var (
 		ctx    = context.Background()
 		logger = log.NewNopLogger()
@@ -2538,8 +2524,9 @@ func prepareBucket(b *testing.B, resolutionLevel compact.ResolutionLevel) (*buck
 		PrependLabels:    nil,
 		Random:           rand.New(rand.NewSource(120)),
 		SkipChunks:       true,
+		SampleType:       sampleType,
 	})
-	blockID := createBlockFromHead(b, tmpDir, head)
+	blockID := storetestutil.CreateBlockFromHead(b, tmpDir, head)
 
 	// Upload the block to the bucket.
 	thanosMeta := metadata.Thanos{
@@ -2648,7 +2635,7 @@ func benchmarkBlockSeriesWithConcurrency(b *testing.B, concurrency int, blockMet
 }
 
 func BenchmarkDownsampledBlockSeries(b *testing.B) {
-	blk, blockMeta := prepareBucket(b, compact.ResolutionLevel5m)
+	blk, blockMeta := prepareBucket(b, compact.ResolutionLevel5m, chunkenc.ValFloat)
 	aggrs := []storepb.Aggr{}
 	for i := 1; i < int(storepb.Aggr_COUNTER); i++ {
 		aggrs = append(aggrs, storepb.Aggr(i))
@@ -2657,5 +2644,18 @@ func BenchmarkDownsampledBlockSeries(b *testing.B) {
 				benchmarkBlockSeriesWithConcurrency(b, concurrency, blockMeta, blk, aggrs)
 			})
 		}
+	}
+}
+
+func BenchmarkDownsampledBlockSeries_NativeHistogram(b *testing.B) {
+	blk, blockMeta := prepareBucket(b, compact.ResolutionLevel5m, chunkenc.ValHistogram)
+	aggrs := []storepb.Aggr{}
+
+	// Native histograms only have aggregates for COUNT, COUNTER and SUM.
+	aggrsTypes := []storepb.Aggr{storepb.Aggr_COUNT, storepb.Aggr_COUNTER, storepb.Aggr_SUM}
+	for _, concurrency := range []int{1, 2, 4, 8, 16, 32} {
+		b.Run(fmt.Sprintf("aggregates: %v, concurrency: %d", aggrs, concurrency), func(b *testing.B) {
+			benchmarkBlockSeriesWithConcurrency(b, concurrency, blockMeta, blk, aggrsTypes)
+		})
 	}
 }
