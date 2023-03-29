@@ -320,8 +320,8 @@ replace (
 	// Required by Cortex https://github.com/cortexproject/cortex/pull/3051.
 	github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-20180902122335-24332e2d58ab
 
-	// Pointing to branch merge-pending-prs, commit 0d97b62bc27c89d85e34247b0a1d0015737fe26a
-	github.com/thanos-community/promql-engine => github.com/fpetkovski/promql-engine v0.0.0-20230328112839-0d97b62bc27c
+	// Pointing to branch merge-pending-prs, commit d3ccf5ceafff592385b3fea3bd0d0767df00a31c
+	github.com/thanos-community/promql-engine => github.com/fpetkovski/promql-engine v0.0.0-20230329095152-d3ccf5ceafff
 
 	github.com/vimeo/galaxycache => github.com/thanos-community/galaxycache v0.0.0-20211122094458-3a32041a1f1e
 
