@@ -753,6 +753,9 @@ func downsampleAggrLoop(
 		chks = chks[j:]
 
 		chk, err := downsampleAggr(part, buf, resolution)
+		if chk.MaxTime == math.MinInt64 {
+			panic("downsampleAggr returned empty chunk")
+		}
 		if err != nil {
 			return nil, err
 		}

@@ -410,6 +410,28 @@ func TestDownsample(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "reproduce empty chunk",
+			inAggr: []map[AggrType][]sample{
+				{
+					AggrCount:   {{t: 1679688941708, v: 1}, {t: 1679689199999, v: 1}, {t: 1679689499999, v: 1}, {t: 1679689799999, v: 1}, {t: 1679689811708, v: 1}},
+					AggrSum:     {{t: 1679688941708, v: 1}, {t: 1679689199999, v: 1}, {t: 1679689499999, v: 1}, {t: 1679689799999, v: 1}, {t: 1679689811708, v: 1}},
+					AggrMin:     {{t: 1679688941708, v: 1}, {t: 1679689199999, v: 1}, {t: 1679689499999, v: 1}, {t: 1679689799999, v: 1}, {t: 1679689811708, v: 1}},
+					AggrMax:     {{t: 1679688941708, v: 1}, {t: 1679689199999, v: 1}, {t: 1679689499999, v: 1}, {t: 1679689799999, v: 1}, {t: 1679689811708, v: 1}},
+					AggrCounter: {{t: 1679688941708, v: 1}, {t: 1679689199999, v: 1}, {t: 1679689499999, v: 1}, {t: 1679689799999, v: 1}, {t: 1679689811708, v: 1}},
+				},
+			},
+			resolution: ResLevel2,
+			expected: []map[AggrType][]sample{
+				{
+					AggrCount:   {{t: 1679689811708, v: 5}},
+					AggrSum:     {{t: 1679689811708, v: 5}},
+					AggrMin:     {{t: 1679689811708, v: 1}},
+					AggrMax:     {{t: 1679689811708, v: 1}},
+					AggrCounter: {{t: 1679688941708, v: 1}, {t: 1679689811708, v: 1}, {t: 1679689811708, v: 1}},
+				},
+			},
+		},
 		// TODO(bwplotka): This is not very efficient for further query time, we should produce 2 chunks. Fix it https://github.com/thanos-io/thanos/issues/2542.
 		func() *downsampleTestCase {
 			d := &downsampleTestCase{
