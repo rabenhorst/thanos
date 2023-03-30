@@ -827,9 +827,10 @@ func genericAggregate(
 	chks []*AggrChunk,
 	buf *[]sample,
 	ab *aggrChunkBuilder,
-	resolution, mint, maxt int64,
+	resolution int64,
 	f func(a sampleAggregator) float64,
-) error {
+) (int64, int64, error) {
+	var mint, maxt int64 = math.MaxInt64, math.MinInt64
 	var reuseIt chunkenc.Iterator
 	*buf = (*buf)[:0]
 
@@ -839,14 +840,14 @@ func genericAggregate(
 		if err == ErrAggrNotExist {
 			continue
 		} else if err != nil {
-			return err
+			return 0, 0, err
 		}
 		if err := expandXorChunkIterator(c.Iterator(reuseIt), buf); err != nil {
-			return err
+			return 0, 0, err
 		}
 	}
 	if len(*buf) == 0 {
-		return nil
+		return 0, 0, nil
 	}
 	ab.chunks[at] = chunkenc.NewXORChunk()
 	ab.apps[at], _ = ab.chunks[at].Appender()
@@ -859,7 +860,8 @@ func genericAggregate(
 		}
 		ab.apps[at].Append(t, f(a))
 	})
-	return nil
+
+	return mint, maxt, nil
 }
 
 func downsampleAggrBatch(chks []*AggrChunk, buf *[]sample, resolution int64) (chk chunks.Meta, err error) {
@@ -870,7 +872,14 @@ func downsampleAggrBatch(chks []*AggrChunk, buf *[]sample, resolution int64) (ch
 	// do does a generic aggregation for count, sum, min, and max aggregates.
 	// Counters need special treatment.
 	do := func(at AggrType, f func(a sampleAggregator) float64) error {
-		return genericAggregate(at, chks, buf, ab, resolution, mint, maxt, f)
+		aggrMint, aggrMaxt, err := genericAggregate(at, chks, buf, ab, resolution, f)
+		if aggrMint < mint {
+			mint = aggrMint
+		}
+		if aggrMaxt > maxt {
+			maxt = aggrMaxt
+		}
+		return err
 	}
 	if err := do(AggrCount, func(a sampleAggregator) float64 {
 		// To get correct count of elements from already downsampled count chunk
@@ -936,6 +945,10 @@ func downsampleAggrBatch(chks []*AggrChunk, buf *[]sample, resolution int64) (ch
 	// Retain last raw value; see ApplyCounterResetsSeriesIterator.
 	ab.apps[AggrCounter].Append(lastT, it.lastV)
 
+	if maxt == math.MinInt64 {
+		panic("Wrong")
+	}
+
 	ab.mint = mint
 	ab.maxt = maxt
 	return ab.encode(), nil
@@ -994,11 +1007,18 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 	})
 
 	*buf = (*buf)[:0]
-	if err := genericAggregate(AggrCount, chks, buf, ab, resolution, mint, maxt, func(a sampleAggregator) float64 {
+	batchMint, batchMaxt, err := genericAggregate(AggrCount, chks, buf, ab, resolution, func(a sampleAggregator) float64 {
 		aggr := mustGetFloatAggregator(a)
 		return aggr.sum
-	}); err != nil {
+	})
+	if err != nil {
 		return chk, err
+	}
+	if batchMint < mint {
+		mint = batchMint
+	}
+	if batchMaxt > maxt {
+		maxt = batchMaxt
 	}
 
 	ab.mint = mint
