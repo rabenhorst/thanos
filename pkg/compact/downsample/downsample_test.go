@@ -510,6 +510,8 @@ func TestDownsample(t *testing.T) {
 			lset = builder.Labels()
 			testutil.Equals(t, labels.FromStrings("__name__", "a"), lset)
 
+			assertValidChunkTime(t, chks)
+
 			var got []map[AggrType][]sample
 			for _, c := range chks {
 				chk, err := chunkr.Chunk(c)
@@ -850,6 +852,8 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 
 			meta, chks := GetMetaAndChunks(t, dir, idResLevel1)
 
+			assertValidChunkTime(t, chks)
+
 			if len(tt.expectedReseLevel1) > 0 {
 				compareAggreggates(t, dir, ResLevel1, idResLevel1.String(), tt.expectedReseLevel1, chks)
 			}
@@ -860,6 +864,8 @@ func TestDownSampleNativeHistogram(t *testing.T) {
 			testutil.Ok(t, err)
 
 			_, chks = GetMetaAndChunks(t, dir, idResLevel2)
+
+			assertValidChunkTime(t, chks)
 
 			if len(tt.expectedReseLevel2) > 0 {
 				compareAggreggates(t, dir, ResLevel2, idResLevel2.String(), tt.expectedReseLevel2, chks)
@@ -962,6 +968,14 @@ func compareAggreggates(t *testing.T, dir string, resLevel int64, blockID string
 
 		sum := GetAggregateFromChunk(t, chunkr, c, AggrSum)
 		testUtilWithOps.Equals(t, expected[i].sum, sum, "sum mismatch for chunk %d with resolution %d", i, resLevel)
+	}
+}
+
+func assertValidChunkTime(t *testing.T, chks []chunks.Meta) {
+	t.Helper()
+	for _, chk := range chks {
+		testutil.Assert(t, chk.MinTime != math.MaxInt64, "chunk MinTime is not set")
+		testutil.Assert(t, chk.MaxTime >= chk.MinTime, "chunk MaxTime is not greater equal to  MinTime")
 	}
 }
 

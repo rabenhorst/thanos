@@ -979,6 +979,11 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 
 	schema := minSchema(*buf)
 	downsampleBatch(*buf, resolution, newHistogramAggregator(schema), func(t int64, a sampleAggregator) {
+		if t < mint {
+			mint = t
+		} else if t > maxt {
+			maxt = t
+		}
 		ab.appendFloatHistogram(AggrCounter, t, mustGetHistogramAggregator(a).counter)
 	})
 
