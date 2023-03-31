@@ -753,9 +753,11 @@ func downsampleAggrLoop(
 		chks = chks[j:]
 
 		chk, err := downsampleAggr(part, buf, resolution)
-		if chk.MaxTime == math.MinInt64 {
-			panic("downsampleAggr returned empty chunk")
+		if chk.MinTime == math.MaxInt64 || chk.MaxTime == math.MinInt64 {
+			msg := fmt.Sprintf("invalid range for downsampled aggregate chunk: mint=%d maxt=%d", chk.MinTime, chk.MaxTime)
+			return nil, errors.New(msg)
 		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -947,10 +949,6 @@ func downsampleAggrBatch(chks []*AggrChunk, buf *[]sample, resolution int64) (ch
 
 	// Retain last raw value; see ApplyCounterResetsSeriesIterator.
 	ab.apps[AggrCounter].Append(lastT, it.lastV)
-
-	if maxt == math.MinInt64 {
-		panic("Wrong")
-	}
 
 	ab.mint = mint
 	ab.maxt = maxt
