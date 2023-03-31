@@ -411,7 +411,7 @@ func TestDownsample(t *testing.T) {
 			},
 		},
 		{
-			name: "reproduce empty chunk",
+			name: "reproduce invalid chunk time",
 			inAggr: []map[AggrType][]sample{
 				{
 					AggrCount:   {{t: 1679688941708, v: 1}, {t: 1679689199999, v: 1}, {t: 1679689499999, v: 1}, {t: 1679689799999, v: 1}, {t: 1679689811708, v: 1}},
