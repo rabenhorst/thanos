@@ -860,7 +860,8 @@ func genericAggregate(
 	downsampleBatch(*buf, resolution, &floatAggregator{}, func(t int64, a sampleAggregator) {
 		if t < mint {
 			mint = t
-		} else if t > maxt {
+		}
+		if t > maxt {
 			maxt = t
 		}
 		ab.apps[at].Append(t, f(a))
@@ -941,7 +942,8 @@ func downsampleAggrBatch(chks []*AggrChunk, buf *[]sample, resolution int64) (ch
 	lastT := downsampleBatch(*buf, resolution, &floatAggregator{}, func(t int64, a sampleAggregator) {
 		if t < mint {
 			mint = t
-		} else if t > maxt {
+		}
+		if t > maxt {
 			maxt = t
 		}
 		ab.apps[AggrCounter].Append(t, mustGetFloatAggregator(a).counter)
@@ -979,7 +981,8 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 	downsampleBatch(*buf, resolution, newHistogramAggregator(schema), func(t int64, a sampleAggregator) {
 		if t < mint {
 			mint = t
-		} else if t > maxt {
+		}
+		if t > maxt {
 			maxt = t
 		}
 		ab.appendFloatHistogram(AggrCounter, t, mustGetHistogramAggregator(a).counter)
@@ -1006,7 +1009,8 @@ func downsampleHistogramAggrBatch(chks []*AggrChunk, buf *[]sample, resolution i
 	downsampleBatch(*buf, resolution, newHistogramAggregator(schema), func(t int64, a sampleAggregator) {
 		if t < mint {
 			mint = t
-		} else if t > maxt {
+		}
+		if t > maxt {
 			maxt = t
 		}
 		ab.appendFloatHistogram(AggrSum, t, mustGetHistogramAggregator(a).sum)
