@@ -46,7 +46,7 @@ require (
 	github.com/leanovate/gopter v0.2.9
 	github.com/lightstep/lightstep-tracer-go v0.25.0
 	github.com/lovoo/gcloud-opentracing v0.3.0
-	github.com/miekg/dns v1.1.51
+	github.com/miekg/dns v1.1.53
 	github.com/minio/minio-go/v7 v7.0.45 // indirect
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f
 	github.com/oklog/run v1.1.0
@@ -64,7 +64,7 @@ require (
 	github.com/prometheus/common v0.42.0
 	github.com/prometheus/exporter-toolkit v0.9.1
 	// Prometheus maps version 2.x.y to tags v0.x.y.
-	github.com/prometheus/prometheus v0.43.0
+	github.com/prometheus/prometheus v0.43.1-0.20230404063557-e709b0b36eb1
 	github.com/sony/gobreaker v0.5.0
 	github.com/stretchr/testify v1.8.2
 	github.com/thanos-community/promql-engine v0.0.0-20230314165423-6b2c5f11bd85
@@ -88,7 +88,7 @@ require (
 	golang.org/x/sync v0.1.0
 	golang.org/x/text v0.8.0
 	golang.org/x/time v0.3.0
-	google.golang.org/api v0.111.0 // indirect
+	google.golang.org/api v0.114.0 // indirect
 	google.golang.org/genproto v0.0.0-20230306155012-7f2fa6fef1f4 // indirect
 	google.golang.org/grpc v1.53.0
 	google.golang.org/grpc/examples v0.0.0-20211119005141-f45e61797429
@@ -139,7 +139,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.0 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/cncf/xds/go v0.0.0-20230112175826-46e39c7b9b43 // indirect
-	github.com/digitalocean/godo v1.97.0 // indirect
+	github.com/digitalocean/godo v1.98.0 // indirect
 	github.com/docker/distribution v2.8.1+incompatible // indirect
 	github.com/docker/docker v23.0.1+incompatible // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
@@ -167,7 +167,7 @@ require (
 	github.com/hashicorp/serf v0.10.1 // indirect
 	github.com/hetznercloud/hcloud-go v1.41.0 // indirect
 	github.com/imdario/mergo v0.3.13 // indirect
-	github.com/ionos-cloud/sdk-go/v6 v6.1.4 // indirect
+	github.com/ionos-cloud/sdk-go/v6 v6.1.5 // indirect
 	github.com/kolo/xmlrpc v0.0.0-20220921171641-a4b6fa1dd06b // indirect
 	github.com/linode/linodego v1.14.1 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -251,7 +251,7 @@ require (
 	github.com/google/pprof v0.0.0-20230228050547-1710fef4ab10 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.2.3 // indirect
-	github.com/googleapis/gax-go/v2 v2.7.0 // indirect
+	github.com/googleapis/gax-go/v2 v2.7.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.15.2 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/joeshaw/multierror v0.0.0-20140124173710-69b34d4ec901 // indirect
@@ -310,7 +310,7 @@ require (
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	gonum.org/v1/gonum v0.12.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/protobuf v1.29.0 // indirect
+	google.golang.org/protobuf v1.29.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	howett.net/plist v0.0.0-20181124034731-591f970eefbb // indirect
 )
@@ -320,8 +320,8 @@ replace (
 	// Required by Cortex https://github.com/cortexproject/cortex/pull/3051.
 	github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-20180902122335-24332e2d58ab
 
-	// Pointing to branch merge-pending-prs, commit 3c7bfc50f162e5cc6d2ce8a1546ff600d260b9b1
-	github.com/thanos-community/promql-engine => github.com/fpetkovski/promql-engine v0.0.0-20230331065528-3c7bfc50f162
+	// Pointing to branch merge-pending-prs, commit c491d06ef1453d4efc2fa84e133e39121d6d54a4
+	github.com/thanos-community/promql-engine => github.com/fpetkovski/promql-engine v0.0.0-20230404093448-c491d06ef145
 
 	github.com/vimeo/galaxycache => github.com/thanos-community/galaxycache v0.0.0-20211122094458-3a32041a1f1e
 
