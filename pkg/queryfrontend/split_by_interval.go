@@ -12,12 +12,36 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/prometheus/promql/parser"
 
 	"github.com/thanos-io/thanos/internal/cortex/querier/queryrange"
 )
 
+var Functions = map[string]*parser.Function{
+	"xdelta": {
+		Name:       "xdelta",
+		ArgTypes:   []parser.ValueType{parser.ValueTypeMatrix},
+		ReturnType: parser.ValueTypeVector,
+	},
+	"xincrease": {
+		Name:       "xincrease",
+		ArgTypes:   []parser.ValueType{parser.ValueTypeMatrix},
+		ReturnType: parser.ValueTypeVector,
+	},
+	"xrate": {
+		Name:       "xrate",
+		ArgTypes:   []parser.ValueType{parser.ValueTypeMatrix},
+		ReturnType: parser.ValueTypeVector,
+	},
+}
+
 // SplitByIntervalMiddleware creates a new Middleware that splits requests by a given interval.
 func SplitByIntervalMiddleware(interval queryrange.IntervalFn, limits queryrange.Limits, merger queryrange.Merger, registerer prometheus.Registerer) queryrange.Middleware {
+	// Set the parser functions for extended functions appropriately as they are not present in prometheus
+	parser.Functions["xdelta"] = Functions["xdelta"]
+	parser.Functions["xincrease"] = Functions["xincrease"]
+	parser.Functions["xrate"] = Functions["xrate"]
+
 	return queryrange.MiddlewareFunc(func(next queryrange.Handler) queryrange.Handler {
 		return splitByInterval{
 			next:     next,
