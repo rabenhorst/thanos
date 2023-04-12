@@ -14,6 +14,7 @@ import (
 	"github.com/efficientgo/core/testutil"
 	"github.com/go-kit/log"
 	"github.com/prometheus/prometheus/storage"
+
 	"github.com/thanos-io/thanos/pkg/component"
 	"github.com/thanos-io/thanos/pkg/store"
 	"github.com/thanos-io/thanos/pkg/store/storepb"
@@ -37,7 +38,7 @@ func TestQuerier_Proxy(t *testing.T) {
 			logger,
 			nil,
 			store.NewProxyStore(logger, nil, func() []store.Client { return clients },
-				component.Debug, nil, 5*time.Minute, store.EagerRetrieval, nil),
+				component.Debug, nil, 5*time.Minute, store.EagerRetrieval),
 			1000000,
 			5*time.Minute,
 		)
