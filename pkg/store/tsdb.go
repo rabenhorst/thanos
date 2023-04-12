@@ -10,6 +10,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/pkg/errors"
@@ -322,4 +323,21 @@ func labelsToMap(lset labels.Labels) map[string]struct{} {
 		r[l.Name] = struct{}{}
 	}
 	return r
+}
+
+// GuaranteedMinTime returns the minimum timestamp in milliseconds that will always be present in a TSDB.
+func GuaranteedMinTime(now, mint, retentionDuration, minBlockDuration int64) int64 {
+	if mint == UninitializedTSDBTime {
+		return UninitializedTSDBTime
+	}
+
+	estimatedRetentionTime := time.UnixMilli(now - retentionDuration)
+	blockAlignedRetention := estimatedRetentionTime.
+		Truncate(time.Duration(minBlockDuration) * time.Millisecond).
+		UnixMilli()
+
+	// The first few samples in a block are sometimes not wall-clock aligned.
+	// We add a small offset proportional to the block size to make sure we skip
+	// the first few minutes in a TSDB.
+	return blockAlignedRetention + minBlockDuration/8
 }

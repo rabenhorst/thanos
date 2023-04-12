@@ -858,7 +858,6 @@ func newProxyStore(storeAPIs ...storepb.StoreServer) *store.ProxyStore {
 		nil,
 		0,
 		store.EagerRetrieval,
-		nil,
 	)
 }
 

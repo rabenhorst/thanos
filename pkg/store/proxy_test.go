@@ -68,8 +68,7 @@ func TestProxyStore_Info(t *testing.T) {
 		nil,
 		func() []Client { return nil },
 		component.Query,
-		nil, 0*time.Second, RetrievalStrategy(EagerRetrieval),
-		nil,
+		nil, 0*time.Second, EagerRetrieval,
 	)
 
 	resp, err := q.Info(ctx, &storepb.InfoRequest{})
@@ -674,7 +673,7 @@ func TestProxyStore_Series(t *testing.T) {
 								},
 							},
 						}
-					}, component.Store, labels.FromStrings("role", "proxy"), 1*time.Minute, EagerRetrieval, nil), 1),
+					}, component.Store, labels.FromStrings("role", "proxy"), 1*time.Minute, EagerRetrieval), 1),
 				},
 				&storetestutil.TestClient{
 					MinTime: 1,
@@ -727,13 +726,16 @@ func TestProxyStore_Series(t *testing.T) {
 						t.Run(string(strategy), func(t *testing.T) {
 							relabelConfig, err := block.ParseRelabelConfig([]byte(tc.relableConfig), SupportedRelabelActions)
 							testutil.Ok(t, err)
+							opts := []ProxyStoreOption{
+								WithProxyStoreRelabelConfig(relabelConfig),
+							}
 							q := NewProxyStore(nil,
 								nil,
 								func() []Client { return tc.storeAPIs },
 								component.Query,
 								tc.selectorLabels,
 								5*time.Second, strategy,
-								relabelConfig,
+								opts...,
 							)
 
 							ctx := context.Background()
@@ -1267,7 +1269,6 @@ func TestProxyStore_SeriesSlowStores(t *testing.T) {
 						component.Query,
 						tc.selectorLabels,
 						4*time.Second, strategy,
-						nil,
 					)
 
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1326,7 +1327,6 @@ func TestProxyStore_Series_RequestParamsProxied(t *testing.T) {
 		component.Query,
 		nil,
 		1*time.Second, EagerRetrieval,
-		nil,
 	)
 
 	ctx := context.Background()
@@ -1388,7 +1388,6 @@ func TestProxyStore_Series_RegressionFillResponseChannel(t *testing.T) {
 		component.Query,
 		labels.FromStrings("fed", "a"),
 		5*time.Second, EagerRetrieval,
-		nil,
 	)
 
 	ctx := context.Background()
@@ -1436,7 +1435,6 @@ func TestProxyStore_LabelValues(t *testing.T) {
 		component.Query,
 		nil,
 		0*time.Second, EagerRetrieval,
-		nil,
 	)
 
 	ctx := context.Background()
@@ -1637,7 +1635,6 @@ func TestProxyStore_LabelNames(t *testing.T) {
 				component.Query,
 				nil,
 				5*time.Second, EagerRetrieval,
-				nil,
 			)
 
 			ctx := context.Background()
@@ -1865,12 +1862,11 @@ func TestGuaranteedMinTime(t *testing.T) {
 			}
 			proxy := NewProxyStore(log.NewNopLogger(), prometheus.NewRegistry(), func() []Client {
 				return clients
-			}, component.Store, nil, 1*time.Second, LazyRetrieval, nil)
+			}, component.Store, nil, 1*time.Second, LazyRetrieval)
 
 			testutil.Equals(t, test.expected, proxy.GuaranteedMinTime())
 		})
 	}
-
 }
 
 // storeSeriesServer is test gRPC storeAPI series server.

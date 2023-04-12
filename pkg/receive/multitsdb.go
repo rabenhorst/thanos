@@ -95,29 +95,25 @@ type nowMillis func() int64
 
 type localClient struct {
 	storepb.StoreClient
-
-	sendsSortedSeries bool
-	nowFunc           nowMillis
-	labelSetFunc      func() []labelpb.ZLabelSet
-	timeRangeFunc     func() (int64, int64)
-	tsdbOpts          *tsdb.Options
+	nowFunc       nowMillis
+	labelSetFunc  func() []labelpb.ZLabelSet
+	timeRangeFunc func() (int64, int64)
+	tsdbOpts      *tsdb.Options
 }
 
 func NewLocalClient(
 	c storepb.StoreClient,
-	sendsSortedSeries bool,
 	nowFunc nowMillis,
 	labelSetFunc func() []labelpb.ZLabelSet,
 	timeRangeFunc func() (int64, int64),
 	tsdbOpts *tsdb.Options,
 ) store.Client {
 	return &localClient{
-		StoreClient:       c,
-		sendsSortedSeries: sendsSortedSeries,
-		nowFunc:           nowFunc,
-		labelSetFunc:      labelSetFunc,
-		timeRangeFunc:     timeRangeFunc,
-		tsdbOpts:          tsdbOpts,
+		StoreClient:   c,
+		nowFunc:       nowFunc,
+		labelSetFunc:  labelSetFunc,
+		timeRangeFunc: timeRangeFunc,
+		tsdbOpts:      tsdbOpts,
 	}
 }
 
@@ -131,23 +127,7 @@ func (l *localClient) TimeRange() (mint int64, maxt int64) {
 
 func (l *localClient) GuaranteedMinTime() int64 {
 	mint, _ := l.timeRangeFunc()
-	// Having a mint of math.MaxInt64 means the database is not yet initialized.
-	if mint == store.UninitializedTSDBTime {
-		return store.UninitializedTSDBTime
-	}
-
-	now := l.nowFunc()
-	estimatedRetention := time.UnixMilli(now - l.tsdbOpts.RetentionDuration)
-
-	roundTo := time.Duration(l.tsdbOpts.MinBlockDuration) * time.Millisecond
-	blockAlignedRetention := estimatedRetention.Truncate(roundTo).UnixMilli()
-
-	// The first few samples in a block are sometimes not wall-clock aligned.
-	// We add a small offset proportional to the block size to make sure we skip
-	// the first few minutes in a TSDB.
-	blockAlignedRetention += l.tsdbOpts.MinBlockDuration / 8
-
-	return blockAlignedRetention
+	return store.GuaranteedMinTime(l.nowFunc(), mint, l.tsdbOpts.RetentionDuration, l.tsdbOpts.MinBlockDuration)
 }
 
 func (l *localClient) String() string {
@@ -171,7 +151,7 @@ func (l *localClient) SupportsWithoutReplicaLabels() bool {
 }
 
 func (l *localClient) SendsSeriesSortedForDedup() bool {
-	return l.sendsSortedSeries
+	return true
 }
 
 type tenant struct {
@@ -213,7 +193,7 @@ func (t *tenant) client(logger log.Logger, tsdbOpts *tsdb.Options) store.Client 
 	}
 
 	client := storepb.ServerAsClient(store.NewRecoverableStoreServer(logger, tsdbStore), 0)
-	return NewLocalClient(client, true, nowInMillis, tsdbStore.LabelSet, tsdbStore.TimeRange, tsdbOpts)
+	return NewLocalClient(client, nowInMillis, tsdbStore.LabelSet, tsdbStore.TimeRange, tsdbOpts)
 }
 
 func (t *tenant) exemplars() *exemplars.TSDB {
