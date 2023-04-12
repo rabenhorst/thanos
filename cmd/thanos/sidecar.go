@@ -106,9 +106,8 @@ func runSidecar(
 
 		// Start out with the full time range. The shipper will constrain it later.
 		// TODO(fabxc): minimum timestamp is never adjusted if shipping is disabled.
-		mint:      conf.limitMinTime.PrometheusTimestamp(),
-		maxt:      math.MaxInt64,
-		retention: math.MaxInt64,
+		mint: conf.limitMinTime.PrometheusTimestamp(),
+		maxt: math.MaxInt64,
 
 		limitMinTime: conf.limitMinTime,
 		client:       promclient.NewWithTracingClient(logger, httpClient, "thanos-sidecar"),
@@ -167,7 +166,7 @@ func runSidecar(
 					return errors.Wrap(err, "validate Prometheus flags")
 				}
 				if flags != nil {
-					m.UpdateRetention(time.Duration(flags.TSDBRetention).Milliseconds())
+					m.UpdateFlags(flags)
 				}
 			}
 
@@ -271,11 +270,9 @@ func runSidecar(
 			}),
 			info.WithStoreInfoFunc(func() *infopb.StoreInfo {
 				if httpProbe.IsReady() {
+					now := time.Now().UnixMilli()
 					mint, maxt := promStore.Timestamps()
-					guaranteedMinTime := maxt - m.Retention()
-					if mint < guaranteedMinTime {
-						guaranteedMinTime = mint
-					}
+					guaranteedMinTime := store.GuaranteedMinTime(now, mint, m.Retention(), m.MinBlockSize())
 					return &infopb.StoreInfo{
 						MinTime:                      mint,
 						MaxTime:                      maxt,
@@ -418,7 +415,7 @@ type promMetadata struct {
 	mtx         sync.Mutex
 	mint        int64
 	maxt        int64
-	retention   int64
+	flags       *promclient.Flags
 	labels      labels.Labels
 	promVersion string
 
@@ -466,22 +463,33 @@ func (s *promMetadata) Timestamps() (mint, maxt int64) {
 	return s.mint, s.maxt
 }
 
-func (s *promMetadata) UpdateRetention(retention int64) {
+func (s *promMetadata) UpdateFlags(flags *promclient.Flags) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	s.retention = retention
+	s.flags = flags
 }
 
 func (s *promMetadata) Retention() int64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	if s.retention == 0 {
+	if s.flags == nil || s.flags.TSDBRetention == 0 {
 		return s.mint
 	}
 
-	return s.retention
+	return time.Duration(s.flags.TSDBRetention).Milliseconds()
+}
+
+func (s *promMetadata) MinBlockSize() int64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if s.flags == nil {
+		return 0
+	}
+
+	return time.Duration(s.flags.TSDBMinTime).Milliseconds()
 }
 
 func (s *promMetadata) BuildVersion(ctx context.Context) error {
