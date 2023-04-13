@@ -78,7 +78,6 @@ func NewQueryableCreator(
 		shardInfo *storepb.ShardInfo,
 		seriesStatsReporter seriesStatsReporter,
 	) storage.Queryable {
-		reg = extprom.WrapRegistererWithPrefix("concurrent_selects_", reg)
 		return &queryable{
 			logger:              logger,
 			replicaLabels:       replicaLabels,
