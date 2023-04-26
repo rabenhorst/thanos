@@ -695,14 +695,22 @@ func (r *RulerBuilder) WithRestoreIgnoredLabels(labels ...string) *RulerBuilder 
 }
 
 func (r *RulerBuilder) InitTSDB(internalRuleDir string, queryCfg []httpconfig.Config) *e2emon.InstrumentedRunnable {
-	return r.initRule(internalRuleDir, queryCfg, nil)
+	return r.initRule(internalRuleDir, queryCfg, nil, nil)
 }
 
 func (r *RulerBuilder) InitStateless(internalRuleDir string, queryCfg []httpconfig.Config, remoteWriteCfg []*config.RemoteWriteConfig) *e2emon.InstrumentedRunnable {
-	return r.initRule(internalRuleDir, queryCfg, remoteWriteCfg)
+	return r.initRule(internalRuleDir, queryCfg, nil, remoteWriteCfg)
 }
 
-func (r *RulerBuilder) initRule(internalRuleDir string, queryCfg []httpconfig.Config, remoteWriteCfg []*config.RemoteWriteConfig) *e2emon.InstrumentedRunnable {
+func (r *RulerBuilder) InitTSDBGRPCQuery(internalRuleDir string, grpcQueryEndpoints []string) *e2emon.InstrumentedRunnable {
+	return r.initRule(internalRuleDir, nil, grpcQueryEndpoints, nil)
+}
+
+func (r *RulerBuilder) InitStatelessGRCPQuery(internalRuleDir string, grpcQueryEndpoints []string, remoteWriteCfg []*config.RemoteWriteConfig) *e2emon.InstrumentedRunnable {
+	return r.initRule(internalRuleDir, nil, grpcQueryEndpoints, remoteWriteCfg)
+}
+
+func (r *RulerBuilder) initRule(internalRuleDir string, queryCfg []httpconfig.Config, grpcQueryEndpoints []string, remoteWriteCfg []*config.RemoteWriteConfig) *e2emon.InstrumentedRunnable {
 	if err := os.MkdirAll(r.f.Dir(), 0750); err != nil {
 		return &e2emon.InstrumentedRunnable{Runnable: e2e.NewFailedRunnable(r.Name(), errors.Wrap(err, "create rule dir"))}
 	}
@@ -712,11 +720,6 @@ func (r *RulerBuilder) initRule(internalRuleDir string, queryCfg []httpconfig.Co
 	})
 	if err != nil {
 		return &e2emon.InstrumentedRunnable{Runnable: e2e.NewFailedRunnable(r.Name(), errors.Wrapf(err, "generate am file: %v", r.amCfg))}
-	}
-
-	queryCfgBytes, err := yaml.Marshal(queryCfg)
-	if err != nil {
-		return &e2emon.InstrumentedRunnable{Runnable: e2e.NewFailedRunnable(r.Name(), errors.Wrapf(err, "generate query file: %v", queryCfg))}
 	}
 
 	ruleArgs := map[string]string{
@@ -730,11 +733,25 @@ func (r *RulerBuilder) initRule(internalRuleDir string, queryCfg []httpconfig.Co
 		"--alertmanagers.config":          string(amCfgBytes),
 		"--alertmanagers.sd-dns-interval": "1s",
 		"--log.level":                     infoLogLevel,
-		"--query.config":                  string(queryCfgBytes),
 		"--query.sd-dns-interval":         "1s",
 		"--resend-delay":                  "5s",
 		"--for-grace-period":              "1s",
 	}
+
+	if len(queryCfg) > 0 {
+		queryCfgBytes, err := yaml.Marshal(queryCfg)
+		if err != nil {
+			return &e2emon.InstrumentedRunnable{Runnable: e2e.NewFailedRunnable(r.Name(), errors.Wrapf(err, "generate query file: %v", queryCfg))}
+		}
+		ruleArgs["--query.config"] = string(queryCfgBytes)
+	}
+
+	if len(grpcQueryEndpoints) > 0 {
+		for _, endpoint := range grpcQueryEndpoints {
+			ruleArgs["--grpc-query-endpoint"] = endpoint
+		}
+	}
+
 	if r.replicaLabel != "" {
 		ruleArgs["--label"] = fmt.Sprintf(`%s="%s"`, replicaLabel, r.replicaLabel)
 	}

@@ -514,7 +514,7 @@ func (s *promMetadata) Version() string {
 
 type sidecarConfig struct {
 	http            httpConfig
-	grpc            grpcConfig
+	grpc            grpcServerConfig
 	prometheus      prometheusConfig
 	tsdb            tsdbConfig
 	reloader        reloaderConfig

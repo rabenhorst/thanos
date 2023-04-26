@@ -1,0 +1,6 @@
+groups:
+  - name: synthetic_native_histogram
+    interval: 1s
+    rules:
+      - record: synthetic_native_histogram:sum
+        expr: sum(synthetic_native_histogram)

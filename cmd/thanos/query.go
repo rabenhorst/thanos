@@ -39,7 +39,6 @@ import (
 	"github.com/thanos-io/thanos/pkg/discovery/dns"
 	"github.com/thanos-io/thanos/pkg/exemplars"
 	"github.com/thanos-io/thanos/pkg/extgrpc"
-	"github.com/thanos-io/thanos/pkg/extgrpc/snappy"
 	"github.com/thanos-io/thanos/pkg/extkingpin"
 	"github.com/thanos-io/thanos/pkg/extprom"
 	extpromhttp "github.com/thanos-io/thanos/pkg/extprom/http"
@@ -81,17 +80,11 @@ func registerQuery(app *extkingpin.App) {
 
 	httpBindAddr, httpGracePeriod, httpTLSConfig := extkingpin.RegisterHTTPFlags(cmd)
 
-	var grpcServerConfig grpcConfig
+	var grpcServerConfig grpcServerConfig
 	grpcServerConfig.registerFlag(cmd)
 
-	secure := cmd.Flag("grpc-client-tls-secure", "Use TLS when talking to the gRPC server").Default("false").Bool()
-	skipVerify := cmd.Flag("grpc-client-tls-skip-verify", "Disable TLS certificate verification i.e self signed, signed by fake CA").Default("false").Bool()
-	cert := cmd.Flag("grpc-client-tls-cert", "TLS Certificates to use to identify this client to the server").Default("").String()
-	key := cmd.Flag("grpc-client-tls-key", "TLS Key for the client's certificate").Default("").String()
-	caCert := cmd.Flag("grpc-client-tls-ca", "TLS CA Certificates to use to verify gRPC servers").Default("").String()
-	serverName := cmd.Flag("grpc-client-server-name", "Server name to verify the hostname on the returned gRPC certificates. See https://tools.ietf.org/html/rfc4366#section-3.1").Default("").String()
-	compressionOptions := strings.Join([]string{snappy.Name, compressionNone}, ", ")
-	grpcCompression := cmd.Flag("grpc-compression", "Compression algorithm to use for gRPC requests to other clients. Must be one of: "+compressionOptions).Default(compressionNone).Enum(snappy.Name, compressionNone)
+	var grpcClientConfig grpcClientConfig
+	grpcClientConfig.registerFlag(cmd)
 
 	webRoutePrefix := cmd.Flag("web.route-prefix", "Prefix for API and UI endpoints. This allows thanos UI to be served on a sub-path. Defaults to the value of --web.external-prefix. This option is analogous to --web.route-prefix of Prometheus.").Default("").String()
 	webExternalPrefix := cmd.Flag("web.external-prefix", "Static prefix for all HTML links and redirect URLs in the UI query web interface. Actual endpoints are still served on / or the web.route-prefix. This allows thanos UI to be served behind a reverse proxy that strips a URL sub-path.").Default("").String()
@@ -281,13 +274,7 @@ func registerQuery(app *extkingpin.App) {
 			grpcLogOpts,
 			tagOpts,
 			grpcServerConfig,
-			*grpcCompression,
-			*secure,
-			*skipVerify,
-			*cert,
-			*key,
-			*caCert,
-			*serverName,
+			grpcClientConfig,
 			*httpBindAddr,
 			*httpTLSConfig,
 			time.Duration(*httpGracePeriod),
@@ -357,14 +344,8 @@ func runQuery(
 	httpLogOpts []logging.Option,
 	grpcLogOpts []grpc_logging.Option,
 	tagOpts []tags.Option,
-	grpcServerConfig grpcConfig,
-	grpcCompression string,
-	secure bool,
-	skipVerify bool,
-	cert string,
-	key string,
-	caCert string,
-	serverName string,
+	grpcServerConfig grpcServerConfig,
+	grpcClientConfig grpcClientConfig,
 	httpBindAddr string,
 	httpTLSConfig string,
 	httpGracePeriod time.Duration,
@@ -433,12 +414,22 @@ func runQuery(
 		Help: "The number of times a duplicated store addresses is detected from the different configs in query",
 	})
 
-	dialOpts, err := extgrpc.StoreClientGRPCOpts(logger, reg, tracer, secure, skipVerify, cert, key, caCert, serverName)
+	dialOpts, err := extgrpc.StoreClientGRPCOpts(
+		logger,
+		reg,
+		tracer,
+		grpcClientConfig.secure,
+		grpcClientConfig.skipVerify,
+		grpcClientConfig.cert,
+		grpcClientConfig.key,
+		grpcClientConfig.caCert,
+		grpcClientConfig.serverName,
+	)
 	if err != nil {
 		return errors.Wrap(err, "building gRPC client")
 	}
-	if grpcCompression != compressionNone {
-		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.UseCompressor(grpcCompression)))
+	if grpcClientConfig.grpcCompression != compressionNone {
+		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.UseCompressor(grpcClientConfig.grpcCompression)))
 	}
 
 	fileSDCache := cache.New()

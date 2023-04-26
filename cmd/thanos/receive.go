@@ -753,7 +753,7 @@ type receiveConfig struct {
 	httpGracePeriod *model.Duration
 	httpTLSConfig   *string
 
-	grpcConfig grpcConfig
+	grpcConfig grpcServerConfig
 
 	rwAddress          string
 	rwServerCert       string
