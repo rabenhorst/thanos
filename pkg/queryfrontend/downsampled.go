@@ -98,21 +98,23 @@ forLoop:
 // Each SampleStream within r.Data.Result must be sorted by timestamp.
 func minResponseTime(r queryrange.Response) int64 {
 	var res = r.(*queryrange.PrometheusResponse).Data.Result
-	if len(res) == 0 || len(res[0].Samples) == 0 && len(res[0].Histograms) == 0 {
+	if len(res) == 0 || (len(res[0].Samples) == 0 && len(res[0].Histograms) == 0) {
 		return -1
 	}
 
 	minTs := int64(math.MaxInt64)
 
 	for _, sampleStream := range res {
-		var ts int64
 		if len(sampleStream.Samples) > 0 {
-			ts = sampleStream.Samples[0].TimestampMs
-		} else if len(sampleStream.Histograms) > 0 {
-			ts = sampleStream.Histograms[0].Timestamp
+			if ts := sampleStream.Samples[0].TimestampMs; ts < minTs {
+				minTs = ts
+			}
 		}
-		if ts < minTs {
-			minTs = ts
+
+		if len(sampleStream.Histograms) > 0 {
+			if ts := sampleStream.Histograms[0].Timestamp; ts < minTs {
+				minTs = ts
+			}
 		}
 	}
 

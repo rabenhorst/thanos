@@ -492,8 +492,7 @@ func (s *Sample) MarshalJSON() ([]byte, error) {
 	sample.Value = model.SampleValue(s.SampleValue)
 	sample.Timestamp = model.Time(s.Timestamp)
 	if s.Histogram != nil {
-		msh := toModelSampleHistogram(*s.Histogram)
-		sample.Histogram = msh
+		sample.Histogram = toModelSampleHistogram(*s.Histogram)
 	}
 	return json.Marshal(sample)
 }
@@ -716,13 +715,9 @@ func matrixMerge(resps []*PrometheusResponse) []SampleStream {
 				}
 			}
 
-			if len(stream.Samples) > 0 {
-				existing.Samples = append(existing.Samples, stream.Samples...)
-			}
+			existing.Samples = append(existing.Samples, stream.Samples...)
 
-			if len(stream.Histograms) > 0 {
-				existing.Histograms = append(existing.Histograms, stream.Histograms...)
-			}
+			existing.Histograms = append(existing.Histograms, stream.Histograms...)
 
 			output[metric] = existing
 		}

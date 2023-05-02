@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -279,7 +280,16 @@ func (s *TSDBStore) LabelNames(ctx context.Context, r *storepb.LabelNamesRequest
 		sort.Strings(res)
 	}
 
-	return &storepb.LabelNamesResponse{Names: res}, nil
+	// Label values can come from a postings table of a memory-mapped block which can be deleted during
+	// head compaction. Since we close the block querier before we return from the function,
+	// we need to copy label values to make sure the client still has access to the data when
+	// a block is deleted.
+	values := make([]string, len(res))
+	for i := range res {
+		values[i] = strings.Clone(res[i])
+	}
+
+	return &storepb.LabelNamesResponse{Names: values}, nil
 }
 
 // LabelValues returns all known label values for a given label name.
@@ -314,7 +324,16 @@ func (s *TSDBStore) LabelValues(ctx context.Context, r *storepb.LabelValuesReque
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &storepb.LabelValuesResponse{Values: res}, nil
+	// Label values can come from a postings table of a memory-mapped block which can be deleted during
+	// head compaction. Since we close the block querier before we return from the function,
+	// we need to copy label values to make sure the client still has access to the data when
+	// a block is deleted.
+	values := make([]string, len(res))
+	for i := range res {
+		values[i] = strings.Clone(res[i])
+	}
+
+	return &storepb.LabelValuesResponse{Values: values}, nil
 }
 
 func labelsToMap(lset labels.Labels) map[string]struct{} {

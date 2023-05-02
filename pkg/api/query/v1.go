@@ -43,6 +43,10 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/util/stats"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
+	promqlapi "github.com/thanos-community/promql-engine/api"
+	"github.com/thanos-community/promql-engine/engine"
+	"github.com/thanos-community/promql-engine/logicalplan"
+
 	"github.com/thanos-io/thanos/pkg/api"
 	"github.com/thanos-io/thanos/pkg/exemplars"
 	"github.com/thanos-io/thanos/pkg/exemplars/exemplarspb"
@@ -73,7 +77,59 @@ const (
 	Stats                    = "stats"
 	ShardInfoParam           = "shard_info"
 	LookbackDeltaParam       = "lookback_delta"
+	EngineParam              = "engine"
 )
+
+type PromqlEngineType string
+
+const (
+	PromqlEnginePrometheus PromqlEngineType = "prometheus"
+	PromqlEngineThanos     PromqlEngineType = "thanos"
+)
+
+type QueryEngineFactory struct {
+	engineOpts            promql.EngineOpts
+	logicalOptimizers     []logicalplan.Optimizer
+	remoteEngineEndpoints promqlapi.RemoteEndpoints
+
+	prometheusEngine v1.QueryEngine
+	thanosEngine     v1.QueryEngine
+}
+
+func (f *QueryEngineFactory) GetPrometheusEngine() v1.QueryEngine {
+	if f.prometheusEngine != nil {
+		return f.prometheusEngine
+	}
+
+	f.prometheusEngine = promql.NewEngine(f.engineOpts)
+	return f.prometheusEngine
+}
+
+func (f *QueryEngineFactory) GetThanosEngine() v1.QueryEngine {
+	if f.thanosEngine != nil {
+		return f.thanosEngine
+	}
+
+	if f.remoteEngineEndpoints == nil {
+		f.thanosEngine = engine.New(engine.Opts{EngineOpts: f.engineOpts, Engine: f.GetPrometheusEngine(), LogicalOptimizers: f.logicalOptimizers})
+	} else {
+		f.thanosEngine = engine.NewDistributedEngine(engine.Opts{EngineOpts: f.engineOpts, Engine: f.GetPrometheusEngine(), LogicalOptimizers: f.logicalOptimizers}, f.remoteEngineEndpoints)
+	}
+
+	return f.thanosEngine
+}
+
+func NewQueryEngineFactory(
+	engineOpts promql.EngineOpts,
+	remoteEngineEndpoints promqlapi.RemoteEndpoints,
+	logicalOptimizers []logicalplan.Optimizer,
+) *QueryEngineFactory {
+	return &QueryEngineFactory{
+		engineOpts:            engineOpts,
+		logicalOptimizers:     logicalOptimizers,
+		remoteEngineEndpoints: remoteEngineEndpoints,
+	}
+}
 
 // QueryAPI is an API used by Thanos Querier.
 type QueryAPI struct {
@@ -82,7 +138,8 @@ type QueryAPI struct {
 	gate            gate.Gate
 	queryableCreate query.QueryableCreator
 	// queryEngine returns appropriate promql.Engine for a query with a given step.
-	queryEngine         v1.QueryEngine
+	engineFactory       QueryEngineFactory
+	defaultEngine       PromqlEngineType
 	lookbackDeltaCreate func(int64) time.Duration
 	ruleGroups          rules.UnaryClient
 	targets             targets.UnaryClient
@@ -119,7 +176,8 @@ type seriesQueryPerformanceMetricsAggregator interface {
 func NewQueryAPI(
 	logger log.Logger,
 	endpointStatus func() []query.EndpointStatus,
-	qe v1.QueryEngine,
+	engineFactory QueryEngineFactory,
+	defaultEngine PromqlEngineType,
 	lookbackDeltaCreate func(int64) time.Duration,
 	c query.QueryableCreator,
 	ruleGroups rules.UnaryClient,
@@ -149,7 +207,8 @@ func NewQueryAPI(
 	return &QueryAPI{
 		baseAPI:                                api.NewBaseAPI(logger, disableCORS, flagsMap),
 		logger:                                 logger,
-		queryEngine:                            qe,
+		engineFactory:                          engineFactory,
+		defaultEngine:                          defaultEngine,
 		lookbackDeltaCreate:                    lookbackDeltaCreate,
 		queryableCreate:                        c,
 		gate:                                   gate,
@@ -234,6 +293,26 @@ func (qapi *QueryAPI) parseEnableDedupParam(r *http.Request) (enableDeduplicatio
 		}
 	}
 	return enableDeduplication, nil
+}
+
+func (qapi *QueryAPI) parseEngineParam(r *http.Request) (queryEngine v1.QueryEngine, _ *api.ApiError) {
+	var engine v1.QueryEngine
+
+	param := PromqlEngineType(r.FormValue("engine"))
+	if param == "" {
+		param = qapi.defaultEngine
+	}
+
+	switch param {
+	case PromqlEnginePrometheus:
+		engine = qapi.engineFactory.GetPrometheusEngine()
+	case PromqlEngineThanos:
+		engine = qapi.engineFactory.GetThanosEngine()
+	default:
+		return nil, &api.ApiError{Typ: api.ErrorBadData, Err: errors.Errorf("'%s' bad engine", param)}
+	}
+
+	return engine, nil
 }
 
 func (qapi *QueryAPI) parseReplicaLabelsParam(r *http.Request) (replicaLabels []string, _ *api.ApiError) {
@@ -395,6 +474,11 @@ func (qapi *QueryAPI) query(r *http.Request) (interface{}, []error, *api.ApiErro
 		return nil, nil, apiErr, func() {}
 	}
 
+	engine, apiErr := qapi.parseEngineParam(r)
+	if apiErr != nil {
+		return nil, nil, apiErr, func() {}
+	}
+
 	lookbackDelta := qapi.lookbackDeltaCreate(maxSourceResolution)
 	// Get custom lookback delta from request.
 	lookbackDeltaFromReq, apiErr := qapi.parseLookbackDeltaParam(r)
@@ -410,7 +494,7 @@ func (qapi *QueryAPI) query(r *http.Request) (interface{}, []error, *api.ApiErro
 	defer span.Finish()
 
 	var seriesStats []storepb.SeriesStatsCounter
-	qry, err := qapi.queryEngine.NewInstantQuery(
+	qry, err := engine.NewInstantQuery(
 		qapi.queryableCreate(
 			enableDedup,
 			replicaLabels,
@@ -543,6 +627,11 @@ func (qapi *QueryAPI) queryRange(r *http.Request) (interface{}, []error, *api.Ap
 		return nil, nil, apiErr, func() {}
 	}
 
+	engine, apiErr := qapi.parseEngineParam(r)
+	if apiErr != nil {
+		return nil, nil, apiErr, func() {}
+	}
+
 	lookbackDelta := qapi.lookbackDeltaCreate(maxSourceResolution)
 	// Get custom lookback delta from request.
 	lookbackDeltaFromReq, apiErr := qapi.parseLookbackDeltaParam(r)
@@ -561,7 +650,7 @@ func (qapi *QueryAPI) queryRange(r *http.Request) (interface{}, []error, *api.Ap
 	defer span.Finish()
 
 	var seriesStats []storepb.SeriesStatsCounter
-	qry, err := qapi.queryEngine.NewRangeQuery(
+	qry, err := engine.NewRangeQuery(
 		qapi.queryableCreate(
 			enableDedup,
 			replicaLabels,

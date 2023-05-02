@@ -152,6 +152,20 @@ func TestDownsampled_MinResponseTime(t *testing.T) {
 			expected: 1,
 		},
 		{
+			desc: "mixed float and histogram SampleStreams, float is earliest",
+			sampleStreams: []queryrange.SampleStream{
+				{
+					Samples: []cortexpb.Sample{
+						{TimestampMs: 1},
+					},
+					Histograms: []queryrange.SampleHistogramPair{
+						{Timestamp: 2},
+					},
+				},
+			},
+			expected: 1,
+		},
+		{
 			desc: "mixed float and histogram SampleStreams, histogram is earliest",
 			sampleStreams: []queryrange.SampleStream{
 				{
@@ -160,6 +174,20 @@ func TestDownsampled_MinResponseTime(t *testing.T) {
 					},
 				},
 				{
+					Histograms: []queryrange.SampleHistogramPair{
+						{Timestamp: 2},
+					},
+				},
+			},
+			expected: 2,
+		},
+		{
+			desc: "mixed float and histogram SampleStream, histogram is earliest",
+			sampleStreams: []queryrange.SampleStream{
+				{
+					Samples: []cortexpb.Sample{
+						{TimestampMs: 3},
+					},
 					Histograms: []queryrange.SampleHistogramPair{
 						{Timestamp: 2},
 					},

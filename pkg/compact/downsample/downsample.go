@@ -160,7 +160,6 @@ func Downsample(
 		} else {
 			// Downsample a block that contains aggregated chunks already.
 			for _, c := range chks {
-
 				ac, ok := c.Chunk.(*AggrChunk)
 				if !ok {
 					if c.Chunk.NumSamples() == 0 {
@@ -1129,7 +1128,6 @@ func (it *ApplyCounterResetsSeriesIterator) At() (t int64, v float64) {
 	return it.lastT, it.totalV
 }
 
-// TODO(rabenhorst): Needs to be implemented for native histogram support.
 func (it *ApplyCounterResetsSeriesIterator) AtHistogram() (int64, *histogram.Histogram) {
 	return it.chks[it.i].AtHistogram()
 }
@@ -1252,7 +1250,7 @@ func (it *AverageChunkIterator) Err() error {
 func SamplesFromTSDBSamples(spls []tsdbutil.Sample) []sample {
 	res := make([]sample, len(spls))
 	for i, s := range spls {
-		res[i] = sample{t: s.T(), v: s.V()}
+		res[i] = sample{t: s.T(), v: s.F()}
 	}
 	return res
 }

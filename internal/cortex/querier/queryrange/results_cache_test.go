@@ -42,7 +42,7 @@ var (
 		Start: 1536673680 * 1e3,
 		End:   1536716898 * 1e3,
 		Step:  120 * 1e3,
-		Query: "fake_histogram",
+		Query: "{fake=\"histogram\"}",
 		Stats: "all",
 	}
 	reqHeaders = []*PrometheusRequestHeader{
