@@ -495,6 +495,7 @@ func (qapi *QueryAPI) query(r *http.Request) (interface{}, []error, *api.ApiErro
 
 	var seriesStats []storepb.SeriesStatsCounter
 	qry, err := engine.NewInstantQuery(
+		ctx,
 		qapi.queryableCreate(
 			enableDedup,
 			replicaLabels,
@@ -651,6 +652,7 @@ func (qapi *QueryAPI) queryRange(r *http.Request) (interface{}, []error, *api.Ap
 
 	var seriesStats []storepb.SeriesStatsCounter
 	qry, err := engine.NewRangeQuery(
+		ctx,
 		qapi.queryableCreate(
 			enableDedup,
 			replicaLabels,

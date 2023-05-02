@@ -112,7 +112,7 @@ func (r remoteEngine) LabelSets() []labels.Labels {
 	return result
 }
 
-func (r remoteEngine) NewRangeQuery(opts *promql.QueryOpts, qs string, start, end time.Time, interval time.Duration) (promql.Query, error) {
+func (r remoteEngine) NewRangeQuery(_ context.Context, opts *promql.QueryOpts, qs string, start, end time.Time, interval time.Duration) (promql.Query, error) {
 	qry := &remoteQuery{
 		logger: r.logger,
 		client: r.Client,
