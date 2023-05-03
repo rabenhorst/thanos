@@ -472,6 +472,11 @@ examples-clean:
 	rm -f examples/dashboards/*.json
 	rm -f examples/tmp/*.yaml
 
+.PHONY: sync-mimir-prometheus
+sync-mimir-prometheus:
+	@echo ">> syncing mimir prometheus"
+	@scripts/sync-mimir-prometheus.sh
+
 # non-phony targets
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)

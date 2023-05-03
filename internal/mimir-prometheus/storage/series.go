@@ -24,7 +24,7 @@ import (
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb/chunkenc"
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb/chunks"
 	"github.com/thanos-io/thanos/internal/mimir-prometheus/tsdb/tsdbutil"
-	"github.com/thanos-io/thanos/internal/mimir-prometheus/utils"
+	"github.com/thanos-io/thanos/internal/utils"
 )
 
 type SeriesEntry struct {
