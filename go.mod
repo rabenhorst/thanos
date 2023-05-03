@@ -182,6 +182,7 @@ require (
 	github.com/vultr/govultr/v2 v2.17.2 // indirect
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230209150437-ee73d164e760 // indirect
 	golang.org/x/term v0.7.0 // indirect
+	gonum.org/v1/gonum v0.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/api v0.26.2 // indirect
 	k8s.io/apimachinery v0.26.2 // indirect
@@ -308,7 +309,6 @@ require (
 	golang.org/x/sys v0.7.0
 	golang.org/x/tools v0.8.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
-	gonum.org/v1/gonum v0.12.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

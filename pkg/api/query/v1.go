@@ -45,7 +45,6 @@ import (
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	promqlapi "github.com/thanos-community/promql-engine/api"
 	"github.com/thanos-community/promql-engine/engine"
-	"github.com/thanos-community/promql-engine/logicalplan"
 
 	"github.com/thanos-io/thanos/pkg/api"
 	"github.com/thanos-io/thanos/pkg/exemplars"
@@ -89,7 +88,6 @@ const (
 
 type QueryEngineFactory struct {
 	engineOpts            promql.EngineOpts
-	logicalOptimizers     []logicalplan.Optimizer
 	remoteEngineEndpoints promqlapi.RemoteEndpoints
 
 	prometheusEngine v1.QueryEngine
@@ -111,9 +109,9 @@ func (f *QueryEngineFactory) GetThanosEngine() v1.QueryEngine {
 	}
 
 	if f.remoteEngineEndpoints == nil {
-		f.thanosEngine = engine.New(engine.Opts{EngineOpts: f.engineOpts, Engine: f.GetPrometheusEngine(), LogicalOptimizers: f.logicalOptimizers})
+		f.thanosEngine = engine.New(engine.Opts{EngineOpts: f.engineOpts, Engine: f.GetPrometheusEngine()})
 	} else {
-		f.thanosEngine = engine.NewDistributedEngine(engine.Opts{EngineOpts: f.engineOpts, Engine: f.GetPrometheusEngine(), LogicalOptimizers: f.logicalOptimizers}, f.remoteEngineEndpoints)
+		f.thanosEngine = engine.NewDistributedEngine(engine.Opts{EngineOpts: f.engineOpts, Engine: f.GetPrometheusEngine()}, f.remoteEngineEndpoints)
 	}
 
 	return f.thanosEngine
@@ -122,11 +120,9 @@ func (f *QueryEngineFactory) GetThanosEngine() v1.QueryEngine {
 func NewQueryEngineFactory(
 	engineOpts promql.EngineOpts,
 	remoteEngineEndpoints promqlapi.RemoteEndpoints,
-	logicalOptimizers []logicalplan.Optimizer,
 ) *QueryEngineFactory {
 	return &QueryEngineFactory{
 		engineOpts:            engineOpts,
-		logicalOptimizers:     logicalOptimizers,
 		remoteEngineEndpoints: remoteEngineEndpoints,
 	}
 }
