@@ -1986,7 +1986,7 @@ func TestSeries_SeriesSortedWithoutReplicaLabels(t *testing.T) {
 			srv := newStoreSeriesServer(context.Background())
 			err = store.Series(req, srv)
 			testutil.Ok(t, err)
-			testutil.Assert(t, len(srv.SeriesSet) == len(testData.expectedSeries))
+			testutil.Equals(t, len(srv.SeriesSet), len(testData.expectedSeries))
 
 			var response []labels.Labels
 			for _, respSeries := range srv.SeriesSet {

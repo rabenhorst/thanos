@@ -2,6 +2,8 @@ containers:
   thanos:
     dockerfile:
       path: Dockerfile.shopify
+  thanos-ci:
+    docker: cimg/go:1.19-node
 
 steps:
   - build: thanos

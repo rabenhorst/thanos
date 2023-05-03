@@ -142,9 +142,9 @@ func TestSyncer_GarbageCollect_e2e(t *testing.T) {
 		groups, err := grouper.Groups(sy.Metas())
 		testutil.Ok(t, err)
 
-		testutil.Equals(t, "0@G17241709254077376921", groups[0].Key())
+		testutil.Equals(t, "0@G11417238981180435610", groups[0].Key())
 		testutil.Equals(t, []ulid.ULID{metas[9].ULID, m3.ULID}, groups[0].IDs())
-		testutil.Equals(t, "1000@G17241709254077376921", groups[1].Key())
+		testutil.Equals(t, "1000@G11417238981180435610", groups[1].Key())
 		testutil.Equals(t, []ulid.ULID{m4.ULID}, groups[1].IDs())
 	})
 }
@@ -324,30 +324,27 @@ func testGroupCompactE2e(t *testing.T, mergeFunc storage.VerticalChunkSeriesMerg
 			},
 		})
 
-		groupKey1 := metas[0].Thanos.GroupKey()
-		groupKey2 := metas[6].Thanos.GroupKey()
-
 		testutil.Ok(t, bComp.Compact(ctx))
 		testutil.Equals(t, 5.0, promtest.ToFloat64(sy.metrics.garbageCollectedBlocks))
 		testutil.Equals(t, 5.0, promtest.ToFloat64(sy.metrics.blocksMarkedForDeletion))
 		testutil.Equals(t, 1.0, promtest.ToFloat64(grouper.blocksMarkedForNoCompact))
 		testutil.Equals(t, 0.0, promtest.ToFloat64(sy.metrics.garbageCollectionFailures))
-		testutil.Equals(t, 4, MetricCount(grouper.compactions))
+		testutil.Equals(t, 6, MetricCount(grouper.compactions))
 		testutil.Equals(t, 1.0, promtest.ToFloat64(grouper.compactions.WithLabelValues(metas[0].Thanos.GroupKey())))
 		testutil.Equals(t, 1.0, promtest.ToFloat64(grouper.compactions.WithLabelValues(metas[7].Thanos.GroupKey())))
 		testutil.Equals(t, 0.0, promtest.ToFloat64(grouper.compactions.WithLabelValues(metas[4].Thanos.GroupKey())))
 		testutil.Equals(t, 0.0, promtest.ToFloat64(grouper.compactions.WithLabelValues(metas[5].Thanos.GroupKey())))
-		testutil.Equals(t, 4, MetricCount(grouper.compactionRunsStarted))
+		testutil.Equals(t, 6, MetricCount(grouper.compactionRunsStarted))
 		testutil.Equals(t, 2.0, promtest.ToFloat64(grouper.compactionRunsStarted.WithLabelValues(metas[0].Thanos.GroupKey())))
 		testutil.Equals(t, 1.0, promtest.ToFloat64(grouper.compactionRunsStarted.WithLabelValues(metas[7].Thanos.GroupKey())))
 		testutil.Equals(t, 0.0, promtest.ToFloat64(grouper.compactionRunsStarted.WithLabelValues(metas[4].Thanos.GroupKey())))
 		testutil.Equals(t, 0.0, promtest.ToFloat64(grouper.compactionRunsStarted.WithLabelValues(metas[5].Thanos.GroupKey())))
-		testutil.Equals(t, 4, MetricCount(grouper.compactionRunsCompleted))
+		testutil.Equals(t, 6, MetricCount(grouper.compactionRunsCompleted))
 		testutil.Equals(t, 1.0, promtest.ToFloat64(grouper.compactionRunsCompleted.WithLabelValues(metas[0].Thanos.GroupKey())))
 		testutil.Equals(t, 1.0, promtest.ToFloat64(grouper.compactionRunsCompleted.WithLabelValues(metas[7].Thanos.GroupKey())))
 		testutil.Equals(t, 0.0, promtest.ToFloat64(grouper.compactionRunsCompleted.WithLabelValues(metas[4].Thanos.GroupKey())))
 		testutil.Equals(t, 0.0, promtest.ToFloat64(grouper.compactionRunsCompleted.WithLabelValues(metas[5].Thanos.GroupKey())))
-		testutil.Equals(t, 4, MetricCount(grouper.compactionFailures))
+		testutil.Equals(t, 6, MetricCount(grouper.compactionFailures))
 		testutil.Equals(t, 1.0, promtest.ToFloat64(grouper.compactionFailures.WithLabelValues(metas[0].Thanos.GroupKey())))
 		testutil.Equals(t, 0.0, promtest.ToFloat64(grouper.compactionFailures.WithLabelValues(metas[7].Thanos.GroupKey())))
 		testutil.Equals(t, 0.0, promtest.ToFloat64(grouper.compactionFailures.WithLabelValues(metas[4].Thanos.GroupKey())))
@@ -358,13 +355,11 @@ func testGroupCompactE2e(t *testing.T, mergeFunc storage.VerticalChunkSeriesMerg
 
 		// Check object storage. All blocks that were included in new compacted one should be removed. New compacted ones
 		// are present and looks as expected.
-		nonCompactedExpected := map[ulid.ULID]bool{
-			metas[3].ULID: false,
-			metas[4].ULID: false,
-			metas[5].ULID: false,
-			metas[8].ULID: false,
-			metas[9].ULID: false,
+		nonCompactedExpected := make(map[ulid.ULID]bool, len(metas))
+		for _, m := range metas {
+			nonCompactedExpected[m.ULID] = false
 		}
+
 		others := map[string]metadata.Meta{}
 		testutil.Ok(t, bkt.Iter(ctx, "", func(n string) error {
 			id, ok := block.IsBlockDir(n)
@@ -393,7 +388,14 @@ func testGroupCompactE2e(t *testing.T, mergeFunc storage.VerticalChunkSeriesMerg
 		// We expect two compacted blocks only outside of what we expected in `nonCompactedExpected`.
 		testutil.Equals(t, 2, len(others))
 		{
-			meta, ok := others[groupKey1]
+			expectedThanos := metadata.Thanos{
+				Labels: extLabels.Map(),
+				Source: "compactor",
+				Downsample: metadata.ThanosDownsample{
+					Resolution: 124,
+				},
+			}
+			meta, ok := others[expectedThanos.GroupKey()]
 			testutil.Assert(t, ok, "meta not found")
 
 			testutil.Equals(t, int64(500), meta.MinTime)
@@ -409,7 +411,14 @@ func testGroupCompactE2e(t *testing.T, mergeFunc storage.VerticalChunkSeriesMerg
 			testutil.Assert(t, len(meta.Thanos.SegmentFiles) > 0, "compacted blocks have segment files set")
 		}
 		{
-			meta, ok := others[groupKey2]
+			expectedThanos := metadata.Thanos{
+				Labels: extLabels2.Map(),
+				Source: "compactor",
+				Downsample: metadata.ThanosDownsample{
+					Resolution: 124,
+				},
+			}
+			meta, ok := others[expectedThanos.GroupKey()]
 			testutil.Assert(t, ok, "meta not found")
 
 			testutil.Equals(t, int64(0), meta.MinTime)

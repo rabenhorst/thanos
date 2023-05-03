@@ -1089,8 +1089,8 @@ func benchmarkHandlerMultiTSDBReceiveRemoteWrite(b testutil.TB) {
 
 	runtime.GC()
 	// Take snapshot at the end to reveal how much memory we keep in TSDB.
+	b.Skip("disabled in Shopify CI")
 	testutil.Ok(b, Heap("../../../_dev/thanos/2021/receive2"))
-
 }
 
 func Heap(dir string) (err error) {

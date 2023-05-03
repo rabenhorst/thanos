@@ -206,7 +206,7 @@ func (f *Flags) UnmarshalJSON(b []byte) error {
 	// - prometheus/prometheus: flags should return proper JSON (not bool in string).
 	parsableFlags := struct {
 		TSDBPath           string        `json:"storage.tsdb.path"`
-		TSDBRetention      modelDuration `json:"storage.tsdb.retention.time"`
+		TSDBRetention      modelDuration `json:"storage.tsdb.retention"`
 		TSDBMinTime        modelDuration `json:"storage.tsdb.min-block-duration"`
 		TSDBMaxTime        modelDuration `json:"storage.tsdb.max-block-duration"`
 		WebEnableAdminAPI  modelBool     `json:"web.enable-admin-api"`
