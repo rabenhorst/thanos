@@ -29,7 +29,6 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/thanos-community/promql-engine/api"
-	"github.com/thanos-community/promql-engine/logicalplan"
 
 	apiv1 "github.com/thanos-io/thanos/pkg/api/query"
 	"github.com/thanos-io/thanos/pkg/api/query/querypb"
@@ -106,7 +105,6 @@ func registerQuery(app *extkingpin.App) {
 
 	defaultEngine := cmd.Flag("query.promql-engine", "Default PromQL engine to use.").Default(string(apiv1.PromqlEnginePrometheus)).
 		Enum(string(apiv1.PromqlEnginePrometheus), string(apiv1.PromqlEngineThanos))
-	enableThanosPromQLEngOptimizer := cmd.Flag("query.enable-thanos-promql-engine-optimizer", "Enable query optimizer for Thanos PromQL engine ").Default("true").Bool()
 
 	promqlQueryMode := cmd.Flag("query.mode", "PromQL query mode. One of: local, distributed.").
 		Hidden().
@@ -341,7 +339,6 @@ func registerQuery(app *extkingpin.App) {
 			*queryTelemetrySamplesQuantiles,
 			*queryTelemetrySeriesQuantiles,
 			*defaultEngine,
-			*enableThanosPromQLEngOptimizer,
 			storeRateLimits,
 			storeSelectorRelabelConf,
 			queryMode(*promqlQueryMode),
@@ -419,7 +416,6 @@ func runQuery(
 	queryTelemetrySamplesQuantiles []int64,
 	queryTelemetrySeriesQuantiles []int64,
 	defaultEngine string,
-	enableThanosPromQLEngOptimizer bool,
 	storeRateLimits store.SeriesSelectLimits,
 	storeSelectorRelabelConf extflag.PathOrContent,
 	queryMode queryMode,
@@ -682,10 +678,6 @@ func runQuery(
 		EnableAtModifier:     true,
 	}
 
-	logicalOptimizers := logicalplan.NoOptimizers
-	if enableThanosPromQLEngOptimizer {
-		logicalOptimizers = logicalplan.DefaultOptimizers
-	}
 	// An active query tracker will be added only if the user specifies a non-default path.
 	// Otherwise, the nil active query tracker from existing engine options will be used.
 	if activeQueryDir != "" {
@@ -705,7 +697,6 @@ func runQuery(
 	engineFactory := apiv1.NewQueryEngineFactory(
 		engineOpts,
 		remoteEngineEndpoints,
-		logicalOptimizers,
 	)
 
 	lookbackDeltaCreator := LookbackDeltaFactory(engineOpts, dynamicLookbackDelta)
