@@ -184,14 +184,12 @@ func TestQueryEndpoints(t *testing.T) {
 
 	now := time.Now()
 	timeout := 100 * time.Second
-	ef := QueryEngineFactory{
-		engineOpts: promql.EngineOpts{
-			Logger:     nil,
-			Reg:        nil,
-			MaxSamples: 10000,
-			Timeout:    timeout,
-		},
-	}
+	ef := NewQueryEngineFactory(promql.EngineOpts{
+		Logger:     nil,
+		Reg:        nil,
+		MaxSamples: 10000,
+		Timeout:    timeout,
+	}, nil)
 	api := &QueryAPI{
 		baseAPI: &baseAPI.BaseAPI{
 			Now: func() time.Time { return now },
@@ -728,14 +726,12 @@ func TestMetadataEndpoints(t *testing.T) {
 
 	now := time.Now()
 	timeout := 100 * time.Second
-	ef := QueryEngineFactory{
-		engineOpts: promql.EngineOpts{
-			Logger:     nil,
-			Reg:        nil,
-			MaxSamples: 10000,
-			Timeout:    timeout,
-		},
-	}
+	ef := NewQueryEngineFactory(promql.EngineOpts{
+		Logger:     nil,
+		Reg:        nil,
+		MaxSamples: 10000,
+		Timeout:    timeout,
+	}, nil)
 	api := &QueryAPI{
 		baseAPI: &baseAPI.BaseAPI{
 			Now: func() time.Time { return now },
