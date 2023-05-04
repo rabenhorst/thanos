@@ -79,7 +79,7 @@ import (
 
 type ruleConfig struct {
 	http    httpConfig
-	grpc    grpcServerConfig
+	grpc    grpcConfig
 	web     webConfig
 	shipper shipperConfig
 

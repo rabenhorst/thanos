@@ -8,18 +8,16 @@ package main
 
 import (
 	"net/url"
-	"strings"
 	"time"
 
 	extflag "github.com/efficientgo/tools/extkingpin"
 
 	"github.com/prometheus/common/model"
 
-	"github.com/thanos-io/thanos/pkg/extgrpc/snappy"
 	"github.com/thanos-io/thanos/pkg/extkingpin"
 )
 
-type grpcServerConfig struct {
+type grpcConfig struct {
 	bindAddress      string
 	tlsSrvCert       string
 	tlsSrvKey        string
@@ -28,26 +26,26 @@ type grpcServerConfig struct {
 	maxConnectionAge time.Duration
 }
 
-func (gsc *grpcServerConfig) registerFlag(cmd extkingpin.FlagClause) *grpcServerConfig {
+func (gc *grpcConfig) registerFlag(cmd extkingpin.FlagClause) *grpcConfig {
 	cmd.Flag("grpc-address",
 		"Listen ip:port address for gRPC endpoints (StoreAPI). Make sure this address is routable from other components.").
-		Default("0.0.0.0:10901").StringVar(&gsc.bindAddress)
+		Default("0.0.0.0:10901").StringVar(&gc.bindAddress)
 	cmd.Flag("grpc-server-tls-cert",
 		"TLS Certificate for gRPC server, leave blank to disable TLS").
-		Default("").StringVar(&gsc.tlsSrvCert)
+		Default("").StringVar(&gc.tlsSrvCert)
 	cmd.Flag("grpc-server-tls-key",
 		"TLS Key for the gRPC server, leave blank to disable TLS").
-		Default("").StringVar(&gsc.tlsSrvKey)
+		Default("").StringVar(&gc.tlsSrvKey)
 	cmd.Flag("grpc-server-tls-client-ca",
 		"TLS CA to verify clients against. If no client CA is specified, there is no client verification on server side. (tls.NoClientCert)").
-		Default("").StringVar(&gsc.tlsSrvClientCA)
+		Default("").StringVar(&gc.tlsSrvClientCA)
 	cmd.Flag("grpc-server-max-connection-age", "The grpc server max connection age. This controls how often to re-establish connections and redo TLS handshakes.").
-		Default("60m").DurationVar(&gsc.maxConnectionAge)
+		Default("60m").DurationVar(&gc.maxConnectionAge)
 	cmd.Flag("grpc-grace-period",
 		"Time to wait after an interrupt received for GRPC Server.").
-		Default("2m").DurationVar(&gsc.gracePeriod)
+		Default("2m").DurationVar(&gc.gracePeriod)
 
-	return gsc
+	return gc
 }
 
 type httpConfig struct {
@@ -234,26 +232,4 @@ func (ac *alertMgrConfig) registerFlag(cmd extflag.FlagClause) *alertMgrConfig {
 		StringsVar(&ac.alertExcludeLabels)
 	ac.alertRelabelConfigPath = extflag.RegisterPathOrContent(cmd, "alert.relabel-config", "YAML file that contains alert relabelling configuration.", extflag.WithEnvSubstitution())
 	return ac
-}
-
-type grpcClientConfig struct {
-	secure          bool
-	skipVerify      bool
-	cert            string
-	key             string
-	caCert          string
-	serverName      string
-	grpcCompression string
-}
-
-func (gcc *grpcClientConfig) registerFlag(cmd extkingpin.FlagClause) *grpcClientConfig {
-	cmd.Flag("grpc-client-tls-secure", "Use TLS when talking to the gRPC server").Default("false").BoolVar(&gcc.secure)
-	cmd.Flag("grpc-client-tls-skip-verify", "Disable TLS certificate verification i.e self signed, signed by fake CA").Default("false").BoolVar(&gcc.skipVerify)
-	cmd.Flag("grpc-client-tls-cert", "TLS Certificates to use to identify this client to the server").Default("").StringVar(&gcc.cert)
-	cmd.Flag("grpc-client-tls-key", "TLS Key for the client's certificate").Default("").StringVar(&gcc.key)
-	cmd.Flag("grpc-client-tls-ca", "TLS CA Certificates to use to verify gRPC servers").Default("").StringVar(&gcc.caCert)
-	cmd.Flag("grpc-client-server-name", "Server name to verify the hostname on the returned gRPC certificates. See https://tools.ietf.org/html/rfc4366#section-3.1").Default("").StringVar(&gcc.serverName)
-	compressionOptions := strings.Join([]string{snappy.Name, compressionNone}, ", ")
-	cmd.Flag("grpc-compression", "Compression algorithm to use for gRPC requests to other clients. Must be one of: "+compressionOptions).Default(compressionNone).EnumVar(&gcc.grpcCompression, snappy.Name, compressionNone)
-	return gcc
 }

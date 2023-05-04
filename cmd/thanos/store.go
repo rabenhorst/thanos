@@ -59,7 +59,7 @@ type storeConfig struct {
 	objStoreConfig              extflag.PathOrContent
 	dataDir                     string
 	cacheIndexHeader            bool
-	grpcConfig                  grpcServerConfig
+	grpcConfig                  grpcConfig
 	httpConfig                  httpConfig
 	indexCacheSizeBytes         units.Base2Bytes
 	chunkPoolSize               units.Base2Bytes

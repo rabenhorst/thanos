@@ -321,37 +321,8 @@ Flags:
                                  Listen ip:port address for gRPC endpoints
                                  (StoreAPI). Make sure this address is routable
                                  from other components.
-      --grpc-client-server-name=""
-                                 Server name to verify the hostname on
-                                 the returned gRPC certificates. See
-                                 https://tools.ietf.org/html/rfc4366#section-3.1
-      --grpc-client-tls-ca=""    TLS CA Certificates to use to verify gRPC
-                                 servers
-      --grpc-client-tls-cert=""  TLS Certificates to use to identify this client
-                                 to the server
-      --grpc-client-tls-key=""   TLS Key for the client's certificate
-      --grpc-client-tls-secure   Use TLS when talking to the gRPC server
-      --grpc-client-tls-skip-verify
-                                 Disable TLS certificate verification i.e self
-                                 signed, signed by fake CA
-      --grpc-compression=none    Compression algorithm to use for gRPC requests
-                                 to other clients. Must be one of: snappy, none
       --grpc-grace-period=2m     Time to wait after an interrupt received for
                                  GRPC Server.
-      --grpc-query-endpoint=<endpoint> ...
-                                 Addresses of statically configured Thanos
-                                 APIs with GRPC query support (repeatable).
-                                 The scheme may be prefixed with 'dns+' or
-                                 'dnssrv+' to detect Thanos API servers through
-                                 respective DNS lookups.
-      --grpc-query-endpoint-group=<endpoint-group> ...
-                                 Experimental: DNS name of statically configured
-                                 Thanos API server groups with GRPC querying
-                                 enabled (repeatable). Targets resolved from
-                                 the DNS name will be queried in a round-robin,
-                                 instead of a fanout manner. This flag should
-                                 be used when connecting a Thanos Query to HA
-                                 groups of Thanos components.
       --grpc-server-max-connection-age=60m
                                  The grpc server max connection age. This
                                  controls how often to re-establish connections
