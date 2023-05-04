@@ -62,6 +62,7 @@ import (
 	"github.com/thanos-io/thanos/pkg/prober"
 	"github.com/thanos-io/thanos/pkg/promclient"
 	"github.com/thanos-io/thanos/pkg/query"
+	"github.com/thanos-io/thanos/pkg/queryconfig"
 	thanosrules "github.com/thanos-io/thanos/pkg/rules"
 	"github.com/thanos-io/thanos/pkg/runutil"
 	grpcserver "github.com/thanos-io/thanos/pkg/server/grpc"
@@ -145,15 +146,6 @@ func registerRule(app *extkingpin.App) {
 	cmd.Flag("restore-ignored-label", "Label names to be ignored when restoring alerts from the remote storage. This is only used in stateless mode.").
 		StringsVar(&conf.ignoredLabelNames)
 
-	grpcQueryEndpoints := extkingpin.Addrs(cmd.Flag("grpc-query-endpoint", "Addresses of statically configured Thanos APIs with GRPC query support (repeatable). The scheme may be prefixed with 'dns+' or 'dnssrv+' to detect Thanos API servers through respective DNS lookups.").
-		PlaceHolder("<endpoint>"))
-
-	grpcQueryEndpointGroups := extkingpin.Addrs(cmd.Flag("grpc-query-endpoint-group", "Experimental: DNS name of statically configured Thanos API server groups with GRPC querying enabled (repeatable). Targets resolved from the DNS name will be queried in a round-robin, instead of a fanout manner. This flag should be used when connecting a Thanos Query to HA groups of Thanos components.").
-		PlaceHolder("<endpoint-group>"))
-
-	var grpcClientConfig grpcClientConfig
-	grpcClientConfig.registerFlag(cmd)
-
 	conf.rwConfig = extflag.RegisterPathOrContent(cmd, "remote-write.config", "YAML config for the remote-write configurations, that specify servers where samples should be sent to (see https://prometheus.io/docs/prometheus/latest/configuration/configuration/#remote_write). This automatically enables stateless mode for ruler and no series will be stored in the ruler's TSDB. If an empty config (or file) is provided, the flag is ignored and ruler is run with its own TSDB.", extflag.WithEnvSubstitution())
 
 	reqLogDecision := cmd.Flag("log.request.decision", "Deprecation Warning - This flag would be soon deprecated, and replaced with `request.logging-config`. Request Logging for logging the start and end of requests. By default this flag is disabled. LogFinishCall: Logs the finish call of the requests. LogStartAndFinishCall: Logs the start and finish call of the requests. NoLogCall: Disable request logging.").Default("").Enum("NoLogCall", "LogFinishCall", "LogStartAndFinishCall", "")
@@ -201,8 +193,8 @@ func registerRule(app *extkingpin.App) {
 		if err != nil {
 			return err
 		}
-		if len(conf.query.sdFiles) == 0 && len(conf.query.addrs) == 0 && len(conf.queryConfigYAML) == 0 && len(grpcQueryEndpoints.String()) == 0 && len(grpcQueryEndpointGroups.String()) == 0 {
-			return errors.New("no --query or --grpc-query-endpoint parameter was given")
+		if len(conf.query.sdFiles) == 0 && len(conf.query.addrs) == 0 && len(conf.queryConfigYAML) == 0 {
+			return errors.New("no --query parameter was given")
 		}
 		if (len(conf.query.sdFiles) != 0 || len(conf.query.addrs) != 0) && len(conf.queryConfigYAML) != 0 {
 			return errors.New("--query/--query.sd-files and --query.config* parameters cannot be defined at the same time")
@@ -239,9 +231,6 @@ func registerRule(app *extkingpin.App) {
 			tracer,
 			comp,
 			*conf,
-			*grpcQueryEndpoints,
-			*grpcQueryEndpointGroups,
-			grpcClientConfig,
 			reload,
 			getFlagsMap(cmd.Flags()),
 			httpLogOpts,
@@ -306,9 +295,6 @@ func runRule(
 	tracer opentracing.Tracer,
 	comp component.Component,
 	conf ruleConfig,
-	grpcQueryEndpointAddrs []string,
-	grpcQueryEndpointGroupAddrs []string,
-	grpcClientConfig grpcClientConfig,
 	reloadSignal <-chan struct{},
 	flagsMap map[string]string,
 	httpLogOpts []logging.Option,
@@ -319,15 +305,15 @@ func runRule(
 ) error {
 	metrics := newRuleMetrics(reg)
 
-	var queryCfg []httpconfig.Config
+	var queryCfg []queryconfig.Config
 	var err error
 	if len(conf.queryConfigYAML) > 0 {
-		queryCfg, err = httpconfig.LoadConfigs(conf.queryConfigYAML)
+		queryCfg, err = queryconfig.LoadConfigs(conf.queryConfigYAML)
 		if err != nil {
 			return err
 		}
 	} else {
-		queryCfg, err = httpconfig.BuildConfig(conf.query.addrs)
+		queryCfg, err = queryconfig.BuildConfig(conf.query.addrs)
 		if err != nil {
 			return errors.Wrap(err, "query configuration")
 		}
@@ -340,10 +326,12 @@ func runRule(
 				RefreshInterval: model.Duration(conf.query.sdInterval),
 			})
 			queryCfg = append(queryCfg,
-				httpconfig.Config{
-					EndpointsConfig: httpconfig.EndpointsConfig{
-						Scheme:        "http",
-						FileSDConfigs: fileSDConfigs,
+				queryconfig.Config{
+					HTTPConfig: httpconfig.Config{
+						EndpointsConfig: httpconfig.EndpointsConfig{
+							Scheme:        "http",
+							FileSDConfigs: fileSDConfigs,
+						},
 					},
 				},
 			)
@@ -356,50 +344,16 @@ func runRule(
 		dns.ResolverType(conf.query.dnsSDResolver),
 	)
 	var (
-		queryClients []*httpconfig.Client
-		promClients  []*promclient.Client
+		queryClients          []*httpconfig.Client
+		promClients           []*promclient.Client
+		grpcQueryEndpointSets []*query.EndpointSet
 	)
 	queryClientMetrics := extpromhttp.NewClientMetrics(extprom.WrapRegistererWith(prometheus.Labels{"client": "query"}, reg))
-	for _, cfg := range queryCfg {
-		cfg.HTTPClientConfig.ClientMetrics = queryClientMetrics
-		c, err := httpconfig.NewHTTPClient(cfg.HTTPClientConfig, "query")
-		if err != nil {
-			return err
-		}
-		c.Transport = tracing.HTTPTripperware(logger, c.Transport)
-		queryClient, err := httpconfig.NewClient(logger, cfg.EndpointsConfig, c, queryProvider.Clone())
-		if err != nil {
-			return err
-		}
-		queryClients = append(queryClients, queryClient)
-		promClients = append(promClients, promclient.NewClient(queryClient, logger, "thanos-rule"))
-		// Discover and resolve query addresses.
-		addDiscoveryGroups(g, queryClient, conf.query.dnsSDInterval)
-	}
 
 	duplicatedGRPCEndpoints := promauto.With(reg).NewCounter(prometheus.CounterOpts{
 		Name: "thanos_rule_grpc_endpoints_duplicated_total",
 		Help: "The number of times a duplicated grpc endpoint is detected from the different configs in rule",
 	})
-
-	dialOpts, err := extgrpc.StoreClientGRPCOpts(
-		logger,
-		reg,
-		tracer,
-		grpcClientConfig.secure,
-		grpcClientConfig.skipVerify,
-		grpcClientConfig.cert,
-		grpcClientConfig.key,
-		grpcClientConfig.caCert,
-		grpcClientConfig.serverName,
-	)
-	if err != nil {
-		return errors.Wrap(err, "building gRPC client")
-	}
-	if grpcClientConfig.grpcCompression != compressionNone {
-		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.UseCompressor(grpcClientConfig.grpcCompression)))
-	}
-
 	dnsEndpointProvider := dns.NewProvider(
 		logger,
 		extprom.WrapRegistererWithPrefix("thanos_rule_grpc_endpoints_", reg),
@@ -407,61 +361,28 @@ func runRule(
 		dns.ResolverType(conf.query.dnsSDResolver),
 	)
 
-	endpoints := query.NewEndpointSet(
-		time.Now,
-		logger,
-		reg,
-		func() (specs []*query.GRPCEndpointSpec) {
-			var tmpSpecs []*query.GRPCEndpointSpec
+	for _, cfg := range queryCfg {
+		cfg.HTTPConfig.HTTPClientConfig.ClientMetrics = queryClientMetrics
+		c, err := httpconfig.NewHTTPClient(cfg.HTTPConfig.HTTPClientConfig, "query")
+		if err != nil {
+			return err
+		}
+		c.Transport = tracing.HTTPTripperware(logger, c.Transport)
+		queryClient, err := httpconfig.NewClient(logger, cfg.HTTPConfig.EndpointsConfig, c, queryProvider.Clone())
+		if err != nil {
+			return err
+		}
+		queryClients = append(queryClients, queryClient)
+		promClients = append(promClients, promclient.NewClient(queryClient, logger, "thanos-rule"))
+		// Discover and resolve query addresses.
+		addDiscoveryGroups(g, queryClient, conf.query.dnsSDInterval)
 
-			for _, addr := range dnsEndpointProvider.Addresses() {
-				tmpSpecs = append(tmpSpecs, query.NewGRPCEndpointSpec(addr, false))
-			}
-			tmpSpecs = removeDuplicateEndpointSpecs(logger, duplicatedGRPCEndpoints, tmpSpecs)
-			specs = append(specs, tmpSpecs...)
-
-			for _, eg := range grpcQueryEndpointGroupAddrs {
-				addr := fmt.Sprintf("dns:///%s", eg)
-				spec := query.NewGRPCEndpointSpec(addr, false, extgrpc.EndpointGroupGRPCOpts()...)
-				specs = append(specs, spec)
-			}
-
-			return specs
-		},
-		dialOpts,
-		time.Minute*5,
-		time.Second*5,
-	)
-
-	// Periodically update the grpc query API set with the addresses we see in our cluster.
-	{
-		ctx, cancel := context.WithCancel(context.Background())
-		g.Add(func() error {
-			return runutil.Repeat(5*time.Second, ctx.Done(), func() error {
-				endpoints.Update(ctx)
-				return nil
-			})
-		}, func(error) {
-			cancel()
-			endpoints.Close()
-		})
+		grpcQueryEndpointSet, err := newGrpcQueryEndpointSet(g, logger, reg, tracer, cfg, duplicatedGRPCEndpoints, dnsEndpointProvider)
+		if err != nil {
+			return err
+		}
+		grpcQueryEndpointSets = append(grpcQueryEndpointSets, grpcQueryEndpointSet)
 	}
-
-	// Periodically update the static grpc query API addresses.
-	ctx, cancel := context.WithCancel(context.Background())
-	g.Add(func() error {
-		return runutil.Repeat(5*time.Second, ctx.Done(), func() error {
-			resolveCtx, resolveCancel := context.WithTimeout(ctx, 5*time.Second)
-			defer resolveCancel()
-			if err := dnsEndpointProvider.Resolve(resolveCtx, grpcQueryEndpointAddrs); err != nil {
-				level.Error(logger).Log("msg", "failed to resolve addresses passed using endpoint flag", "err", err)
-
-			}
-			return nil
-		})
-	}, func(error) {
-		cancel()
-	})
 
 	var (
 		appendable storage.Appendable
@@ -632,7 +553,7 @@ func runRule(
 				OutageTolerance: conf.outageTolerance,
 				ForGracePeriod:  conf.forGracePeriod,
 			},
-			queryFuncCreator(logger, queryClients, promClients, endpoints.GetQueryAPIClients, metrics.duplicatedQuery, metrics.ruleEvalWarnings, conf.query.httpMethod),
+			queryFuncCreator(logger, queryClients, promClients, grpcQueryEndpointSets, metrics.duplicatedQuery, metrics.ruleEvalWarnings, conf.query.httpMethod),
 			conf.lset,
 			// In our case the querying URL is the external URL because in Prometheus
 			// --web.external-url points to it i.e. it points at something where the user
@@ -913,7 +834,7 @@ func queryFuncCreator(
 	logger log.Logger,
 	queriers []*httpconfig.Client,
 	promClients []*promclient.Client,
-	getGRPCClients func() []query.Client,
+	grpcQueryEndpointSets []*query.EndpointSet,
 	duplicatedQuery prometheus.Counter,
 	ruleEvalWarnings *prometheus.CounterVec,
 	httpMethod string,
@@ -960,46 +881,48 @@ func queryFuncCreator(
 				}
 			}
 
-			grcpClients := getGRPCClients()
-			for _, i := range rand.Perm(len(grcpClients)) {
-				result, err := grcpClients[i].Query(ctx, &querypb.QueryRequest{
-					Query:       q,
-					TimeSeconds: t.Unix(),
-				})
-				if err != nil {
-					level.Error(logger).Log("err", err, "query", q)
-					continue
-				}
-
-				var (
-					v        promql.Vector
-					warnings []string
-				)
-
-				for {
-					msg, err := result.Recv()
-					if err == io.EOF {
-						break
-					}
+			for _, i := range rand.Perm(len(grpcQueryEndpointSets)) {
+				queryAPIClients := grpcQueryEndpointSets[i].GetQueryAPIClients()
+				for _, i := range rand.Perm(len(queryAPIClients)) {
+					result, err := queryAPIClients[i].Query(ctx, &querypb.QueryRequest{
+						Query:       q,
+						TimeSeconds: t.Unix(),
+					})
 					if err != nil {
-						return nil, errors.Wrap(err, "receive query result")
+						level.Error(logger).Log("err", err, "query", q)
+						continue
 					}
 
-					ts := msg.GetTimeseries()
-					if ts != nil {
-						v = append(v, prompbTimeSeriesToPromQLSample(ts))
-					}
-					w := msg.GetWarnings()
-					if w != "" {
-						warnings = append(warnings, w)
-					}
-				}
+					var (
+						v        promql.Vector
+						warnings []string
+					)
 
-				if len(warnings) > 0 {
-					ruleEvalWarnings.WithLabelValues(strings.ToLower(partialResponseStrategy.String())).Inc()
-					level.Warn(logger).Log("warnings", strings.Join(warnings, ", "), "query", q)
+					for {
+						msg, err := result.Recv()
+						if err == io.EOF {
+							break
+						}
+						if err != nil {
+							return nil, errors.Wrap(err, "receive query result")
+						}
+
+						ts := msg.GetTimeseries()
+						if ts != nil {
+							v = append(v, prompbTimeSeriesToPromQLSample(ts))
+						}
+						w := msg.GetWarnings()
+						if w != "" {
+							warnings = append(warnings, w)
+						}
+					}
+
+					if len(warnings) > 0 {
+						ruleEvalWarnings.WithLabelValues(strings.ToLower(partialResponseStrategy.String())).Inc()
+						level.Warn(logger).Log("warnings", strings.Join(warnings, ", "), "query", q)
+					}
+					return v, nil
 				}
-				return v, nil
 			}
 			return nil, errors.Errorf("no query API server reachable")
 		}
@@ -1089,4 +1012,84 @@ func reloadRules(logger log.Logger,
 		metrics.rulesLoaded.WithLabelValues(group.PartialResponseStrategy.String(), group.OriginalFile, group.Name()).Set(float64(len(group.Rules())))
 	}
 	return errs.Err()
+}
+
+func newGrpcQueryEndpointSet(g *run.Group, logger log.Logger, reg *prometheus.Registry, tracer opentracing.Tracer, config queryconfig.Config, duplicatedGRPCEndpoints prometheus.Counter, dnsEndpointProvider *dns.Provider) (*query.EndpointSet, error) {
+	grpcConfig := config.GRPCConfig
+	dialOpts, err := extgrpc.StoreClientGRPCOpts(
+		logger,
+		reg,
+		tracer,
+		grpcConfig.ClientConfig.Secure,
+		grpcConfig.ClientConfig.SkipVerify,
+		grpcConfig.ClientConfig.Cert,
+		grpcConfig.ClientConfig.Key,
+		grpcConfig.ClientConfig.CaCert,
+		grpcConfig.ClientConfig.ServerName,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if grpcConfig.ClientConfig.GrpcCompression != compressionNone {
+		// TODO(rabenhorst): Do we need to check compression?
+		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.UseCompressor(grpcConfig.ClientConfig.GrpcCompression)))
+	}
+
+	endpointSet := query.NewEndpointSet(
+		time.Now,
+		logger,
+		reg,
+		func() (specs []*query.GRPCEndpointSpec) {
+			var tmpSpecs []*query.GRPCEndpointSpec
+
+			for _, addr := range dnsEndpointProvider.Addresses() {
+				tmpSpecs = append(tmpSpecs, query.NewGRPCEndpointSpec(addr, false))
+			}
+			tmpSpecs = removeDuplicateEndpointSpecs(logger, duplicatedGRPCEndpoints, tmpSpecs)
+			specs = append(specs, tmpSpecs...)
+
+			for _, eg := range grpcConfig.EndpointGroupAddrs {
+				addr := fmt.Sprintf("dns:///%s", eg)
+				spec := query.NewGRPCEndpointSpec(addr, false, extgrpc.EndpointGroupGRPCOpts()...)
+				specs = append(specs, spec)
+			}
+
+			return specs
+		},
+		dialOpts,
+		time.Minute*5,
+		time.Second*5,
+	)
+
+	// Periodically update the grpc query API set with the addresses we see in our cluster.
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		g.Add(func() error {
+			return runutil.Repeat(5*time.Second, ctx.Done(), func() error {
+				endpointSet.Update(ctx)
+				return nil
+			})
+		}, func(error) {
+			cancel()
+			endpointSet.Close()
+		})
+	}
+
+	// Periodically update the static grpc query API addresses.
+	ctx, cancel := context.WithCancel(context.Background())
+	g.Add(func() error {
+		return runutil.Repeat(5*time.Second, ctx.Done(), func() error {
+			resolveCtx, resolveCancel := context.WithTimeout(ctx, 5*time.Second)
+			defer resolveCancel()
+			if err := dnsEndpointProvider.Resolve(resolveCtx, grpcConfig.EndpointAddrs); err != nil {
+				level.Error(logger).Log("msg", "failed to resolve addresses passed using grpc query config", "err", err)
+
+			}
+			return nil
+		})
+	}, func(error) {
+		cancel()
+	})
+
+	return endpointSet, nil
 }

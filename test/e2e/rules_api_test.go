@@ -6,6 +6,7 @@ package e2e_test
 import (
 	"context"
 	"fmt"
+	"github.com/thanos-io/thanos/pkg/queryconfig"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -67,11 +68,13 @@ func TestRulesAPI_Fanout(t *testing.T) {
 	)
 	testutil.Ok(t, e2e.StartAndWaitReady(prom1, sidecar1, prom2, sidecar2))
 
-	queryCfg := []httpconfig.Config{
+	queryCfg := []queryconfig.Config{
 		{
-			EndpointsConfig: httpconfig.EndpointsConfig{
-				StaticAddresses: []string{qBuilder.InternalEndpoint("http")},
-				Scheme:          "http",
+			HTTPConfig: httpconfig.Config{
+				EndpointsConfig: httpconfig.EndpointsConfig{
+					StaticAddresses: []string{qBuilder.InternalEndpoint("http")},
+					Scheme:          "http",
+				},
 			},
 		},
 	}

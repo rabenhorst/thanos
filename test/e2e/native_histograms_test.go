@@ -6,6 +6,7 @@ package e2e_test
 import (
 	"context"
 	"fmt"
+	"github.com/thanos-io/thanos/pkg/queryconfig"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -375,7 +376,13 @@ func TestRuleNativeHistograms(t *testing.T) {
 	_, err = writeHistograms(ctx, ts, testHistogramMetricName, histograms, nil, rawRemoteWriteURL2, prompb.Label{Name: "series", Value: "two"})
 	testutil.Ok(t, err)
 
-	r := rFuture.InitStatelessGRCPQuery(filepath.Join(rFuture.InternalDir(), rulesSubDir), []string{q.InternalEndpoint("grpc")}, []*config.RemoteWriteConfig{
+	r := rFuture.InitStateless(filepath.Join(rFuture.InternalDir(), rulesSubDir), []queryconfig.Config{
+		{
+			GRPCConfig: queryconfig.GrpcConfig{
+				EndpointAddrs: []string{q.InternalEndpoint("grpc")},
+			},
+		},
+	}, []*config.RemoteWriteConfig{
 		{URL: &common_cfg.URL{URL: rwURL}, Name: "thanos-receiver", SendNativeHistograms: true},
 		{URL: &common_cfg.URL{URL: rwURL2}, Name: "thanos-receiver2", SendNativeHistograms: true},
 	})

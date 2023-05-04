@@ -6,6 +6,7 @@ package e2ethanos
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/thanos-io/thanos/pkg/queryconfig"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -30,8 +31,6 @@ import (
 	"github.com/thanos-io/objstore/exthttp"
 
 	"github.com/thanos-io/thanos/pkg/alert"
-	"github.com/thanos-io/thanos/pkg/httpconfig"
-
 	"github.com/thanos-io/thanos/pkg/queryfrontend"
 	"github.com/thanos-io/thanos/pkg/receive"
 )
@@ -694,23 +693,15 @@ func (r *RulerBuilder) WithRestoreIgnoredLabels(labels ...string) *RulerBuilder 
 	return r
 }
 
-func (r *RulerBuilder) InitTSDB(internalRuleDir string, queryCfg []httpconfig.Config) *e2emon.InstrumentedRunnable {
-	return r.initRule(internalRuleDir, queryCfg, nil, nil)
+func (r *RulerBuilder) InitTSDB(internalRuleDir string, queryCfg []queryconfig.Config) *e2emon.InstrumentedRunnable {
+	return r.initRule(internalRuleDir, queryCfg, nil)
 }
 
-func (r *RulerBuilder) InitStateless(internalRuleDir string, queryCfg []httpconfig.Config, remoteWriteCfg []*config.RemoteWriteConfig) *e2emon.InstrumentedRunnable {
-	return r.initRule(internalRuleDir, queryCfg, nil, remoteWriteCfg)
+func (r *RulerBuilder) InitStateless(internalRuleDir string, queryCfg []queryconfig.Config, remoteWriteCfg []*config.RemoteWriteConfig) *e2emon.InstrumentedRunnable {
+	return r.initRule(internalRuleDir, queryCfg, remoteWriteCfg)
 }
 
-func (r *RulerBuilder) InitTSDBGRPCQuery(internalRuleDir string, grpcQueryEndpoints []string) *e2emon.InstrumentedRunnable {
-	return r.initRule(internalRuleDir, nil, grpcQueryEndpoints, nil)
-}
-
-func (r *RulerBuilder) InitStatelessGRCPQuery(internalRuleDir string, grpcQueryEndpoints []string, remoteWriteCfg []*config.RemoteWriteConfig) *e2emon.InstrumentedRunnable {
-	return r.initRule(internalRuleDir, nil, grpcQueryEndpoints, remoteWriteCfg)
-}
-
-func (r *RulerBuilder) initRule(internalRuleDir string, queryCfg []httpconfig.Config, grpcQueryEndpoints []string, remoteWriteCfg []*config.RemoteWriteConfig) *e2emon.InstrumentedRunnable {
+func (r *RulerBuilder) initRule(internalRuleDir string, queryCfg []queryconfig.Config, remoteWriteCfg []*config.RemoteWriteConfig) *e2emon.InstrumentedRunnable {
 	if err := os.MkdirAll(r.f.Dir(), 0750); err != nil {
 		return &e2emon.InstrumentedRunnable{Runnable: e2e.NewFailedRunnable(r.Name(), errors.Wrap(err, "create rule dir"))}
 	}
@@ -744,12 +735,6 @@ func (r *RulerBuilder) initRule(internalRuleDir string, queryCfg []httpconfig.Co
 			return &e2emon.InstrumentedRunnable{Runnable: e2e.NewFailedRunnable(r.Name(), errors.Wrapf(err, "generate query file: %v", queryCfg))}
 		}
 		ruleArgs["--query.config"] = string(queryCfgBytes)
-	}
-
-	if len(grpcQueryEndpoints) > 0 {
-		for _, endpoint := range grpcQueryEndpoints {
-			ruleArgs["--grpc-query-endpoint"] = endpoint
-		}
 	}
 
 	if r.replicaLabel != "" {

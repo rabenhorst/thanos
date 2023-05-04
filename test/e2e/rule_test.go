@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/thanos-io/thanos/pkg/queryconfig"
 	"io"
 	"net/http"
 	"os"
@@ -317,18 +318,20 @@ func TestRule(t *testing.T) {
 			Timeout:    amTimeout,
 			APIVersion: alert.APIv1,
 		},
-	}).InitTSDB(filepath.Join(rFuture.InternalDir(), rulesSubDir), []httpconfig.Config{
+	}).InitTSDB(filepath.Join(rFuture.InternalDir(), rulesSubDir), []queryconfig.Config{
 		{
-			EndpointsConfig: httpconfig.EndpointsConfig{
-				// We test Statically Addressed queries in other tests. Focus on FileSD here.
-				FileSDConfigs: []httpconfig.FileSDConfig{
-					{
-						// FileSD which will be used to register discover dynamically q.
-						Files:           []string{filepath.Join(rFuture.InternalDir(), queryTargetsSubDir, "*.yaml")},
-						RefreshInterval: model.Duration(time.Second),
+			HTTPConfig: httpconfig.Config{
+				EndpointsConfig: httpconfig.EndpointsConfig{
+					// We test Statically Addressed queries in other tests. Focus on FileSD here.
+					FileSDConfigs: []httpconfig.FileSDConfig{
+						{
+							// FileSD which will be used to register discover dynamically q.
+							Files:           []string{filepath.Join(rFuture.InternalDir(), queryTargetsSubDir, "*.yaml")},
+							RefreshInterval: model.Duration(time.Second),
+						},
 					},
+					Scheme: "http",
 				},
-				Scheme: "http",
 			},
 		},
 	})
@@ -561,13 +564,15 @@ func TestRule_CanRemoteWriteData(t *testing.T) {
 			Timeout:    amTimeout,
 			APIVersion: alert.APIv1,
 		},
-	}).InitStateless(filepath.Join(rFuture.InternalDir(), rulesSubDir), []httpconfig.Config{
+	}).InitStateless(filepath.Join(rFuture.InternalDir(), rulesSubDir), []queryconfig.Config{
 		{
-			EndpointsConfig: httpconfig.EndpointsConfig{
-				StaticAddresses: []string{
-					q.InternalEndpoint("http"),
+			HTTPConfig: httpconfig.Config{
+				EndpointsConfig: httpconfig.EndpointsConfig{
+					StaticAddresses: []string{
+						q.InternalEndpoint("http"),
+					},
+					Scheme: "http",
 				},
-				Scheme: "http",
 			},
 		},
 	}, []*config.RemoteWriteConfig{
@@ -644,13 +649,15 @@ func TestStatelessRulerAlertStateRestore(t *testing.T) {
 			},
 		}).WithForGracePeriod("500ms").
 			WithRestoreIgnoredLabels("tenant_id").
-			InitStateless(filepath.Join(rFuture.InternalDir(), rulesSubDir), []httpconfig.Config{
+			InitStateless(filepath.Join(rFuture.InternalDir(), rulesSubDir), []queryconfig.Config{
 				{
-					EndpointsConfig: httpconfig.EndpointsConfig{
-						StaticAddresses: []string{
-							q.InternalEndpoint("http"),
+					HTTPConfig: httpconfig.Config{
+						EndpointsConfig: httpconfig.EndpointsConfig{
+							StaticAddresses: []string{
+								q.InternalEndpoint("http"),
+							},
+							Scheme: "http",
 						},
-						Scheme: "http",
 					},
 				},
 			}, []*config.RemoteWriteConfig{

@@ -6,6 +6,7 @@ package e2e_test
 import (
 	"bytes"
 	"fmt"
+	"github.com/thanos-io/thanos/pkg/queryconfig"
 	"io"
 	"net/http"
 	"net/url"
@@ -211,13 +212,15 @@ func TestAlertCompliance(t *testing.T) {
 			WithResendDelay("1m").
 			WithEvalInterval("1m").
 			WithReplicaLabel("").
-			InitTSDB(filepath.Join(rFuture.InternalDir(), "rules"), []httpconfig.Config{
+			InitTSDB(filepath.Join(rFuture.InternalDir(), "rules"), []queryconfig.Config{
 				{
-					EndpointsConfig: httpconfig.EndpointsConfig{
-						StaticAddresses: []string{
-							querierBuilder.InternalEndpoint("http"),
+					HTTPConfig: httpconfig.Config{
+						EndpointsConfig: httpconfig.EndpointsConfig{
+							StaticAddresses: []string{
+								querierBuilder.InternalEndpoint("http"),
+							},
+							Scheme: "http",
 						},
-						Scheme: "http",
 					},
 				},
 			})
@@ -293,13 +296,15 @@ func TestAlertCompliance(t *testing.T) {
 			WithEvalInterval("1m").
 			WithReplicaLabel("").
 			WithRestoreIgnoredLabels("tenant_id").
-			InitStateless(filepath.Join(rFuture.InternalDir(), "rules"), []httpconfig.Config{
+			InitStateless(filepath.Join(rFuture.InternalDir(), "rules"), []queryconfig.Config{
 				{
-					EndpointsConfig: httpconfig.EndpointsConfig{
-						StaticAddresses: []string{
-							query.InternalEndpoint("http"),
+					HTTPConfig: httpconfig.Config{
+						EndpointsConfig: httpconfig.EndpointsConfig{
+							StaticAddresses: []string{
+								query.InternalEndpoint("http"),
+							},
+							Scheme: "http",
 						},
-						Scheme: "http",
 					},
 				},
 			}, []*config.RemoteWriteConfig{
