@@ -137,6 +137,8 @@ message SeriesRequest {
   // NOTE(bwplotka): thanos.info.store.supports_without_replica_labels field has to return true to let client knows
   // server supports it.
   repeated string without_replica_labels = 14;
+
+  bool sort_without_store_labels = 15;
 }
 
 // QueryHints represents hints from PromQL that might help to

@@ -164,9 +164,10 @@ func (d *dedupResponseHeap) At() *storepb.SeriesResponse {
 // tournament trees need n-1 auxiliary nodes so there
 // might not be much of a difference.
 type ProxyResponseHeap struct {
-	nodes        []ProxyResponseHeapNode
-	iLblsScratch labels.Labels
-	jLblsScratch labels.Labels
+	nodes                   []ProxyResponseHeapNode
+	iLblsScratch            labels.Labels
+	jLblsScratch            labels.Labels
+	compareWithoutExtLabels bool
 }
 
 func (h *ProxyResponseHeap) Less(i, j int) bool {
@@ -176,11 +177,16 @@ func (h *ProxyResponseHeap) Less(i, j int) bool {
 	if iResp.GetSeries() != nil && jResp.GetSeries() != nil {
 		// Response sets are sorted before adding external labels.
 		// This comparison excludes those labels to keep the same order.
-		iStoreLbls := h.nodes[i].rs.StoreLabels()
-		jStoreLbls := h.nodes[j].rs.StoreLabels()
 
 		iLbls := labelpb.ZLabelsToPromLabels(iResp.GetSeries().Labels)
 		jLbls := labelpb.ZLabelsToPromLabels(jResp.GetSeries().Labels)
+
+		if !h.compareWithoutExtLabels {
+			return labels.Compare(iLbls, jLbls) < 0
+		}
+
+		iStoreLbls := h.nodes[i].rs.StoreLabels()
+		jStoreLbls := h.nodes[j].rs.StoreLabels()
 
 		copyLabels(&h.iLblsScratch, iLbls)
 		copyLabels(&h.jLblsScratch, jLbls)
@@ -236,9 +242,10 @@ type ProxyResponseHeapNode struct {
 
 // NewProxyResponseHeap returns heap that k-way merge series together.
 // It's agnostic to duplicates and overlaps, it forwards all duplicated series in random order.
-func NewProxyResponseHeap(seriesSets ...respSet) *ProxyResponseHeap {
+func NewProxyResponseHeap(compareWithoutExtLabels bool, seriesSets ...respSet) *ProxyResponseHeap {
 	ret := ProxyResponseHeap{
-		nodes: make([]ProxyResponseHeapNode, 0, len(seriesSets)),
+		nodes:                   make([]ProxyResponseHeapNode, 0, len(seriesSets)),
+		compareWithoutExtLabels: compareWithoutExtLabels,
 	}
 
 	for _, ss := range seriesSets {
