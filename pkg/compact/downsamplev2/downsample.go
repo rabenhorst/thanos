@@ -163,12 +163,16 @@ func downsampleRawSeries(
 
 	var aggrChunks []chunks.Meta
 
-	for i := 0; i < len(aggrSeries[downsample.AggrCounter].Floats); i += 120 {
-		to := i + 119
-		if to > len(aggrSeries[downsample.AggrCounter].Floats) {
-			to = len(aggrSeries[downsample.AggrCounter].Floats)
+	for i := 0; i < len(aggrSeries[downsample.AggrCounter].Floats); i += maxSamplesPerChunk {
+		var aggrPoints [5][]promql.FPoint
+		high := i + maxSamplesPerChunk
+		if high > len(aggrSeries[downsample.AggrCounter].Floats) {
+			high = len(aggrSeries[downsample.AggrCounter].Floats)
 		}
-		aggrChunks = append(aggrChunks, downsampleFloatBatch(aggrSeries, int64(i), int64(to)))
+		for j := 0; j <= int(downsample.AggrCounter); j++ {
+			aggrPoints[j] = aggrSeries[j].Floats[i:high]
+		}
+		aggrChunks = append(aggrChunks, downsampleFloatBatch(aggrPoints))
 	}
 
 	return aggrChunks, nil
@@ -217,7 +221,7 @@ func querySingleSeries(ctx context.Context, ng v1.QueryEngine, q storage.Queryab
 	return &res, nil
 }
 
-func downsampleFloatBatch(aggrSeries [5]*promql.Series, from, to int64) chunks.Meta {
+func downsampleFloatBatch(aggrPoints [5][]promql.FPoint) chunks.Meta {
 	var (
 		aggrChunks [5]chunkenc.Chunk
 		aggrApps   [5]chunkenc.Appender
@@ -236,15 +240,15 @@ func downsampleFloatBatch(aggrSeries [5]*promql.Series, from, to int64) chunks.M
 	}
 
 	// A panic here means that series aggregates are not aligned.
-	for i := from; i < to; i++ {
-		for i := 0; i <= int(downsample.AggrCounter); i++ {
-			aggrApps[i].Append(aggrSeries[i].Floats[i].T, aggrSeries[i].Floats[i].F)
+	for i := 0; i < len(aggrPoints[downsample.AggrCounter]); i++ {
+		for j := 0; j <= int(downsample.AggrCounter); j++ {
+			aggrApps[j].Append(aggrPoints[j][i].T, aggrPoints[j][i].F)
 		}
 	}
 
 	return chunks.Meta{
-		MinTime: aggrSeries[downsample.AggrCounter].Floats[from].T,
-		MaxTime: aggrSeries[downsample.AggrCounter].Floats[to-1].T,
+		MinTime: aggrPoints[downsample.AggrCounter][0].T,
+		MaxTime: aggrPoints[downsample.AggrCounter][len(aggrPoints[downsample.AggrCounter])-1].T,
 		Chunk:   downsample.EncodeAggrChunk(aggrChunks),
 	}
 }
