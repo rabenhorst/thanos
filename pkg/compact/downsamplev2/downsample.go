@@ -163,17 +163,18 @@ func downsampleRawSeries(
 
 	var aggrChunks []chunks.Meta
 
-	for i := 0; i < len(aggrSeries[downsample.AggrCounter].Floats); i += maxSamplesPerChunk {
-		var aggrPoints [5][]promql.FPoint
-		high := i + maxSamplesPerChunk
-		if high > len(aggrSeries[downsample.AggrCounter].Floats) {
-			high = len(aggrSeries[downsample.AggrCounter].Floats)
+	counter := 0
+	ab := newAggrChunkBuilder()
+	for i := range aggrSeries[downsample.AggrCounter].Floats {
+		if counter >= maxSamplesPerChunk {
+			aggrChunks = append(aggrChunks, ab.encode())
+			ab = newAggrChunkBuilder()
+			counter = 0
 		}
-		for j := 0; j <= int(downsample.AggrCounter); j++ {
-			aggrPoints[j] = aggrSeries[j].Floats[i:high]
-		}
-		aggrChunks = append(aggrChunks, downsampleFloatBatch(aggrPoints))
+		ab.add(int64(i), aggrSeries)
+		counter++
 	}
+	aggrChunks = append(aggrChunks, newAggrChunkBuilder().encode())
 
 	return aggrChunks, nil
 }
@@ -221,35 +222,51 @@ func querySingleSeries(ctx context.Context, ng v1.QueryEngine, q storage.Queryab
 	return &res, nil
 }
 
-func downsampleFloatBatch(aggrPoints [5][]promql.FPoint) chunks.Meta {
-	var (
-		aggrChunks [5]chunkenc.Chunk
-		aggrApps   [5]chunkenc.Appender
-	)
+type aggrChunkBuilder struct {
+	mint, maxt int64
 
-	aggrChunks[downsample.AggrCount] = chunkenc.NewXORChunk()
-	aggrChunks[downsample.AggrSum] = chunkenc.NewXORChunk()
-	aggrChunks[downsample.AggrMin] = chunkenc.NewXORChunk()
-	aggrChunks[downsample.AggrMax] = chunkenc.NewXORChunk()
-	aggrChunks[downsample.AggrCounter] = chunkenc.NewXORChunk()
+	chunks [5]chunkenc.Chunk
+	apps   [5]chunkenc.Appender
+}
 
-	for i, c := range aggrChunks {
+func newAggrChunkBuilder() *aggrChunkBuilder {
+	b := &aggrChunkBuilder{
+		mint: math.MaxInt64,
+		maxt: math.MinInt64,
+	}
+	b.chunks[downsample.AggrCount] = chunkenc.NewXORChunk()
+	b.chunks[downsample.AggrSum] = chunkenc.NewXORChunk()
+	b.chunks[downsample.AggrMin] = chunkenc.NewXORChunk()
+	b.chunks[downsample.AggrMax] = chunkenc.NewXORChunk()
+	b.chunks[downsample.AggrCounter] = chunkenc.NewXORChunk()
+
+	for i, c := range b.chunks {
 		if c != nil {
-			aggrApps[i], _ = c.Appender()
+			b.apps[i], _ = c.Appender()
 		}
 	}
+	return b
+}
 
-	// A panic here means that series aggregates are not aligned.
-	for i := 0; i < len(aggrPoints[downsample.AggrCounter]); i++ {
-		for j := 0; j <= int(downsample.AggrCounter); j++ {
-			aggrApps[j].Append(aggrPoints[j][i].T, aggrPoints[j][i].F)
-		}
+func (b *aggrChunkBuilder) add(i int64, aggrSeries [5]*promql.Series) {
+	t := aggrSeries[downsample.AggrCounter].Floats[i].T
+	if t < b.mint {
+		b.mint = t
 	}
+	if t > b.maxt {
+		b.maxt = t
+	}
+	for j := 0; j <= int(downsample.AggrCounter); j++ {
+		// Panic here means misaligned series.
+		b.apps[j].Append(aggrSeries[j].Floats[i].T, aggrSeries[j].Floats[i].F)
+	}
+}
 
+func (b *aggrChunkBuilder) encode() chunks.Meta {
 	return chunks.Meta{
-		MinTime: aggrPoints[downsample.AggrCounter][0].T,
-		MaxTime: aggrPoints[downsample.AggrCounter][len(aggrPoints[downsample.AggrCounter])-1].T,
-		Chunk:   downsample.EncodeAggrChunk(aggrChunks),
+		MinTime: b.mint,
+		MaxTime: b.maxt,
+		Chunk:   downsample.EncodeAggrChunk(b.chunks),
 	}
 }
 
