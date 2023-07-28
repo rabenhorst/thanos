@@ -36,12 +36,12 @@ const (
 )
 
 var (
-	promAggregators = map[downsample.AggrType][2]string{
-		downsample.AggrCount:   {"count_over_time", "true"},
-		downsample.AggrSum:     {"sum", ""},
-		downsample.AggrMin:     {"min", ""},
-		downsample.AggrMax:     {"max", ""},
-		downsample.AggrCounter: {"increase", "true"},
+	promAggregators = map[downsample.AggrType]string{
+		downsample.AggrCount:   "count_over_time",
+		downsample.AggrSum:     "sum",
+		downsample.AggrMin:     "min",
+		downsample.AggrMax:     "max",
+		downsample.AggrCounter: "increase",
 	}
 )
 
@@ -103,6 +103,16 @@ func Downsample(
 	}
 	defer runutil.CloseWithErrCapture(&err, streamedBlockWriter, "close stream block writer")
 
+	// Create new promql engine.
+	opts := promql.EngineOpts{
+		Logger:        logger,
+		Reg:           nil,
+		MaxSamples:    math.MaxInt32,
+		Timeout:       30 * time.Second,
+		LookbackDelta: time.Hour,
+	}
+	ng := engine.New(engine.Opts{EngineOpts: opts})
+
 	// Downsample raw block.
 	if origMeta.Thanos.Downsample.Resolution == 0 {
 		q, err := tsdb.NewBlockQuerier(b, b.Meta().MinTime, b.Meta().MaxTime)
@@ -113,19 +123,9 @@ func Downsample(
 		// Get all series from the block.
 		seriesSet := q.Select(false, nil, labels.MustNewMatcher(labels.MatchRegexp, labels.MetricName, ".+"))
 
-		// Create new promql engine.
-		opts := promql.EngineOpts{
-			Logger:        logger,
-			Reg:           nil,
-			MaxSamples:    math.MaxInt32,
-			Timeout:       30 * time.Second,
-			LookbackDelta: 5 * time.Minute,
-		}
-		ng := engine.New(engine.Opts{EngineOpts: opts})
-
 		for seriesSet.Next() {
 			lset := seriesSet.At().Labels()
-			chks, err := downsampleRawSeries(ctx, &blockQuerier{q: q}, ng, lset, time.UnixMilli(b.Meta().MinTime), time.UnixMilli(b.Meta().MaxTime), 5*time.Minute)
+			chks, err := aggrChks(ctx, &blockQuerier{q: q}, ng, lset, time.UnixMilli(b.Meta().MinTime), time.UnixMilli(b.Meta().MaxTime), 5*time.Minute)
 			if err != nil {
 				return id, errors.Wrapf(err, "downsample series: %v", lset.String())
 			}
@@ -139,16 +139,6 @@ func Downsample(
 			return id, errors.Wrap(err, "create queryable for aggregated block")
 		}
 
-		// Create new promql engine.
-		opts := promql.EngineOpts{
-			Logger:        logger,
-			Reg:           nil,
-			MaxSamples:    math.MaxInt32,
-			Timeout:       30 * time.Second,
-			LookbackDelta: time.Hour,
-		}
-		ng := engine.New(engine.Opts{EngineOpts: opts})
-
 		qq, err := q.Querier(ctx, b.Meta().MinTime, b.Meta().MaxTime)
 		if err != nil {
 			return id, errors.Wrap(err, "create querier for aggregated block")
@@ -158,7 +148,7 @@ func Downsample(
 
 		for seriesSet.Next() {
 			lset := seriesSet.At().Labels()
-			chks, err := downsampleRawSeries(ctx, q, ng, lset, time.UnixMilli(b.Meta().MinTime), time.UnixMilli(b.Meta().MaxTime), time.Hour)
+			chks, err := aggrChks(ctx, q, ng, lset, time.UnixMilli(b.Meta().MinTime), time.UnixMilli(b.Meta().MaxTime), time.Hour)
 			if err != nil {
 				return id, errors.Wrapf(err, "downsample series: %v", lset.String())
 			}
@@ -171,7 +161,7 @@ func Downsample(
 	return uid, nil
 }
 
-func downsampleRawSeries(
+func aggrChks(
 	ctx context.Context,
 	q storage.Queryable,
 	ng v1.QueryEngine,
@@ -183,18 +173,15 @@ func downsampleRawSeries(
 		aggrSeries [5]*promql.Series
 		err        error
 	)
-	vectorRange := "5m"
-	if resolution > 5*time.Minute {
-		vectorRange = "1h"
-	}
-	for i := 0; i <= int(downsample.AggrCounter); i++ {
-		aggrSeries[i], err = querySingleSeries(ctx, ng, q, queryString(promAggregators[downsample.AggrType(i)][0], promAggregators[downsample.AggrType(i)][1] != "", vectorRange, lset), bMint, bMaxt, resolution)
+
+	for _, aggrType := range []downsample.AggrType{downsample.AggrCount, downsample.AggrSum, downsample.AggrMin, downsample.AggrMax, downsample.AggrCounter} {
+		aggrSeries[aggrType], err = queryAggr(ctx, ng, q, lset, aggrType, bMint, bMaxt, resolution)
 		if err != nil {
 			return nil, err
 		}
 		// TODO: query first value of counter
-		if i == int(downsample.AggrCounter) {
-			aggrSeries[i].Floats = append([]promql.FPoint{{T: 0, F: 0}}, aggrSeries[i].Floats...)
+		if aggrType == downsample.AggrCounter {
+			aggrSeries[aggrType].Floats = append([]promql.FPoint{{T: 0, F: 0}}, aggrSeries[aggrType].Floats...)
 		}
 	}
 
@@ -215,37 +202,17 @@ func downsampleRawSeries(
 		ab.add(int64(i), aggrSeries)
 		counter++
 	}
-	aggrChunks = append(aggrChunks, newAggrChunkBuilder().encode())
+	aggrChunks = append(aggrChunks, ab.encode())
 
 	return aggrChunks, nil
 }
 
-func queryString(aggregator string, needsVectorRange bool, vectorRange string, series labels.Labels) string {
-	builder := strings.Builder{}
-	builder.WriteString(aggregator)
-	builder.WriteString("({")
-	for i, l := range series {
-		builder.WriteString(fmt.Sprintf("%s=\"%s\"", l.Name, l.Value))
-		if i != len(series)-1 {
-			builder.WriteString(",")
-		}
-	}
-	builder.WriteString("}")
-	if needsVectorRange {
-		builder.WriteString("[")
-		builder.WriteString(vectorRange)
-		builder.WriteString("]")
-	}
-	builder.WriteString(")")
-	return builder.String()
-}
-
-func querySingleSeries(ctx context.Context, ng v1.QueryEngine, q storage.Queryable, qs string, mint, maxt time.Time, step time.Duration) (*promql.Series, error) {
-	query, err := ng.NewRangeQuery(ctx, q, &promql.QueryOpts{}, qs, mint, maxt, step)
+func queryAggr(ctx context.Context, ng v1.QueryEngine, q storage.Queryable, lset labels.Labels, aggrType downsample.AggrType, mint, maxt time.Time, step time.Duration) (*promql.Series, error) {
+	sq, err := ng.NewRangeQuery(ctx, q, &promql.QueryOpts{}, queryString(aggrType, step, lset), mint, maxt, step)
 	if err != nil {
 		return nil, err
 	}
-	sqres := query.Exec(ctx)
+	sqres := sq.Exec(ctx)
 	if sqres.Err != nil {
 		return nil, sqres.Err
 	}
@@ -268,6 +235,24 @@ type aggrChunkBuilder struct {
 
 	chunks [5]chunkenc.Chunk
 	apps   [5]chunkenc.Appender
+}
+
+func queryString(aggrType downsample.AggrType, vectorRange time.Duration, series labels.Labels) string {
+	builder := strings.Builder{}
+	builder.WriteString(promAggregators[aggrType])
+	builder.WriteString("({")
+	for i, l := range series {
+		builder.WriteString(fmt.Sprintf("%s=\"%s\"", l.Name, l.Value))
+		if i != len(series)-1 {
+			builder.WriteString(",")
+		}
+	}
+	builder.WriteString("}")
+	if aggrType == downsample.AggrCounter || aggrType == downsample.AggrCount {
+		_, _ = fmt.Fprintf(&builder, "[%s]", vectorRange)
+	}
+	builder.WriteString(")")
+	return builder.String()
 }
 
 func newAggrChunkBuilder() *aggrChunkBuilder {
@@ -327,7 +312,8 @@ func aligned(series [5]*promql.Series) bool {
 	return true
 }
 
-// This is should be replaced by a queryable that can be directly created from an aggregated chunks block.
+// aggrChunksBlockQueryable creates a queryable for an aggregated chunks block in the give directory.
+// TODO: Replaced by a queryable that can be directly created from an aggregated chunks block.
 func aggrChunksBlockQueryable(ctx context.Context, logger log.Logger, dir string, meta *metadata.Meta) (storage.Queryable, error) {
 	bkt, err := filesystem.NewBucket(dir)
 	if err != nil {
