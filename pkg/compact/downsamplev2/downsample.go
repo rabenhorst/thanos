@@ -14,11 +14,15 @@ import (
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
+	"github.com/thanos-io/objstore"
+	"github.com/thanos-io/objstore/providers/filesystem"
 	"github.com/thanos-io/promql-engine/engine"
 	"github.com/thanos-io/thanos/pkg/block/metadata"
 	"github.com/thanos-io/thanos/pkg/compact/downsample"
 	"github.com/thanos-io/thanos/pkg/errutil"
+	"github.com/thanos-io/thanos/pkg/query"
 	"github.com/thanos-io/thanos/pkg/runutil"
+	"github.com/thanos-io/thanos/pkg/store"
 	"math"
 	"math/rand"
 	"os"
@@ -33,11 +37,11 @@ const (
 
 var (
 	promAggregators = map[downsample.AggrType][2]string{
-		downsample.AggrCount:   {"count_over_time", "5m"},
+		downsample.AggrCount:   {"count_over_time", "true"},
 		downsample.AggrSum:     {"sum", ""},
 		downsample.AggrMin:     {"min", ""},
 		downsample.AggrMax:     {"max", ""},
-		downsample.AggrCounter: {"increase", "5m"},
+		downsample.AggrCounter: {"increase", "true"},
 	}
 )
 
@@ -99,6 +103,7 @@ func Downsample(
 	}
 	defer runutil.CloseWithErrCapture(&err, streamedBlockWriter, "close stream block writer")
 
+	// Downsample raw block.
 	if origMeta.Thanos.Downsample.Resolution == 0 {
 		q, err := tsdb.NewBlockQuerier(b, b.Meta().MinTime, b.Meta().MaxTime)
 		if err != nil {
@@ -120,7 +125,40 @@ func Downsample(
 
 		for seriesSet.Next() {
 			lset := seriesSet.At().Labels()
-			chks, err := downsampleRawSeries(ctx, &blockQuerier{q: q}, ng, lset, time.UnixMilli(b.Meta().MinTime), time.UnixMilli(b.Meta().MaxTime))
+			chks, err := downsampleRawSeries(ctx, &blockQuerier{q: q}, ng, lset, time.UnixMilli(b.Meta().MinTime), time.UnixMilli(b.Meta().MaxTime), 5*time.Minute)
+			if err != nil {
+				return id, errors.Wrapf(err, "downsample series: %v", lset.String())
+			}
+			if err := streamedBlockWriter.WriteSeries(lset, chks); err != nil {
+				return id, errors.Wrapf(err, "write series: %v", lset.String())
+			}
+		}
+	} else {
+		q, err := aggrChunksBlockQueryable(ctx, logger, dir, origMeta)
+		if err != nil {
+			return id, errors.Wrap(err, "create queryable for aggregated block")
+		}
+
+		// Create new promql engine.
+		opts := promql.EngineOpts{
+			Logger:        logger,
+			Reg:           nil,
+			MaxSamples:    math.MaxInt32,
+			Timeout:       30 * time.Second,
+			LookbackDelta: time.Hour,
+		}
+		ng := engine.New(engine.Opts{EngineOpts: opts})
+
+		qq, err := q.Querier(ctx, b.Meta().MinTime, b.Meta().MaxTime)
+		if err != nil {
+			return id, errors.Wrap(err, "create querier for aggregated block")
+		}
+
+		seriesSet := qq.Select(false, nil, labels.MustNewMatcher(labels.MatchRegexp, labels.MetricName, ".+"))
+
+		for seriesSet.Next() {
+			lset := seriesSet.At().Labels()
+			chks, err := downsampleRawSeries(ctx, q, ng, lset, time.UnixMilli(b.Meta().MinTime), time.UnixMilli(b.Meta().MaxTime), time.Hour)
 			if err != nil {
 				return id, errors.Wrapf(err, "downsample series: %v", lset.String())
 			}
@@ -129,8 +167,6 @@ func Downsample(
 			}
 		}
 
-	} else {
-		return id, errors.New("downsampling of already downsampled block is not supported yet")
 	}
 	return uid, nil
 }
@@ -141,13 +177,18 @@ func downsampleRawSeries(
 	ng v1.QueryEngine,
 	lset labels.Labels,
 	bMint, bMaxt time.Time,
+	resolution time.Duration,
 ) ([]chunks.Meta, error) {
 	var (
 		aggrSeries [5]*promql.Series
 		err        error
 	)
+	vectorRange := "5m"
+	if resolution > 5*time.Minute {
+		vectorRange = "1h"
+	}
 	for i := 0; i <= int(downsample.AggrCounter); i++ {
-		aggrSeries[i], err = querySingleSeries(ctx, ng, q, queryString(promAggregators[downsample.AggrType(i)][0], promAggregators[downsample.AggrType(i)][1], lset), bMint, bMaxt, 5*time.Minute)
+		aggrSeries[i], err = querySingleSeries(ctx, ng, q, queryString(promAggregators[downsample.AggrType(i)][0], promAggregators[downsample.AggrType(i)][1] != "", vectorRange, lset), bMint, bMaxt, resolution)
 		if err != nil {
 			return nil, err
 		}
@@ -179,7 +220,7 @@ func downsampleRawSeries(
 	return aggrChunks, nil
 }
 
-func queryString(aggregator string, vectorRange string, series labels.Labels) string {
+func queryString(aggregator string, needsVectorRange bool, vectorRange string, series labels.Labels) string {
 	builder := strings.Builder{}
 	builder.WriteString(aggregator)
 	builder.WriteString("({")
@@ -190,7 +231,7 @@ func queryString(aggregator string, vectorRange string, series labels.Labels) st
 		}
 	}
 	builder.WriteString("}")
-	if vectorRange != "" {
+	if needsVectorRange {
 		builder.WriteString("[")
 		builder.WriteString(vectorRange)
 		builder.WriteString("]")
@@ -270,6 +311,7 @@ func (b *aggrChunkBuilder) encode() chunks.Meta {
 	}
 }
 
+// Checks if all series have the same length and time range.
 func aligned(series [5]*promql.Series) bool {
 	for _, s := range series {
 		if len(s.Floats) != len(series[0].Floats) {
@@ -283,4 +325,47 @@ func aligned(series [5]*promql.Series) bool {
 		}
 	}
 	return true
+}
+
+// This is should be replaced by a queryable that can be directly created from an aggregated chunks block.
+func aggrChunksBlockQueryable(ctx context.Context, logger log.Logger, dir string, meta *metadata.Meta) (storage.Queryable, error) {
+	bkt, err := filesystem.NewBucket(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	bs, err := store.NewBucketStore(
+		objstore.WithNoopInstr(bkt),
+		nil,
+		"",
+		store.NewChunksLimiterFactory(10000/store.MaxSamplesPerChunk),
+		store.NewSeriesLimiterFactory(0),
+		store.NewBytesLimiterFactory(0),
+		store.NewGapBasedPartitioner(store.PartitionerMaxGapSize),
+		10,
+		false,
+		store.DefaultPostingOffsetInMemorySampling,
+		true,
+		false,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := bs.AddBlock(ctx, meta); err != nil {
+		return nil, err
+	}
+
+	return query.NewQueryableCreator(logger, nil, bs, 2, 30*time.Second)(
+		false,
+		nil,
+		nil,
+		9999999,
+		false,
+		false,
+		false,
+		nil,
+		query.NoopSeriesStatsReporter,
+	), nil
 }

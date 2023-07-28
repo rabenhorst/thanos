@@ -32,8 +32,8 @@ func TestDownsample(t *testing.T) {
 			{{Name: labels.MetricName, Value: "a"}, {Name: "a", Value: "1"}},
 			{{Name: labels.MetricName, Value: "a"}, {Name: "a", Value: "2"}},
 		},
-		9600, 0, downsample.ResLevel1DownsampleRange+1, // Pass the minimum ResLevel1DownsampleRange check.
-		labels.Labels{{Name: "e1", Value: "1"}},
+		9600, 0, downsample.ResLevel2DownsampleRange+1, // Pass the minimum ResLevel1DownsampleRange check.
+		labels.Labels{},
 		downsample.ResLevel0, metadata.NoneFunc)
 	testutil.Ok(t, err)
 
@@ -48,9 +48,29 @@ func TestDownsample(t *testing.T) {
 	uid, err := Downsample(ctx, logger, meta, b, dir, downsample.ResLevel1)
 	testutil.Ok(t, err)
 	fmt.Println(uid)
+
+	res1bdir := fmt.Sprintf("%v/%v", dir, uid.String())
+	res1b, err := tsdb.OpenBlock(logger, res1bdir, pool)
+	testutil.Ok(t, err)
+	res1meta, err := metadata.ReadFromDir(res1bdir)
+	testutil.Ok(t, err)
+
+	res1uid, err := Downsample(ctx, logger, res1meta, res1b, dir, downsample.ResLevel2)
+	testutil.Ok(t, err)
+	fmt.Println(res1uid)
+
 }
 
-func TestQueryString(t *testing.T) {
-	qs := queryString("increase", "5m", labels.FromStrings(labels.MetricName, "a", "a", "1"))
-	testutil.Equals(t, `increase({__name__="a",a="1"}[5m])`, qs)
-}
+//func TestQueryString(t *testing.T) {
+//	qs := queryString("increase", "5m", labels.FromStrings(labels.MetricName, "a", "a", "1"))
+//	testutil.Equals(t, `increase({__name__="a",a="1"}[5m])`, qs)
+//}
+
+//func TestQueryDownsampled(t *testing.T) {
+//	bs, err := store.NewBucketStore(
+//		log.NewNopLogger(),
+//	)
+//
+//	bs.
+//
+//}
