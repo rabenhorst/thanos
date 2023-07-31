@@ -558,7 +558,7 @@ func (s *BucketStore) SyncBlocks(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			for meta := range blockc {
-				if err := s.addBlock(ctx, meta); err != nil {
+				if err := s.AddBlock(ctx, meta); err != nil {
 					continue
 				}
 			}
@@ -654,7 +654,7 @@ func (s *BucketStore) getBlock(id ulid.ULID) *bucketBlock {
 	return s.blocks[id]
 }
 
-func (s *BucketStore) addBlock(ctx context.Context, meta *metadata.Meta) (err error) {
+func (s *BucketStore) AddBlock(ctx context.Context, meta *metadata.Meta) (err error) {
 	var dir string
 	if s.dir != "" {
 		dir = filepath.Join(s.dir, meta.ULID.String())

@@ -345,7 +345,7 @@ func TestBucketBlockSet_addGet(t *testing.T) {
 		mint, maxt int64
 		window     int64
 	}
-	// Input is expected to be sorted. It is sorted in addBlock.
+	// Input is expected to be sorted. It is sorted in AddBlock.
 	input := []resBlock{
 		// Blocks from 0 to 100 with raw resolution.
 		{window: downsample.ResLevel0, mint: 0, maxt: 100},
