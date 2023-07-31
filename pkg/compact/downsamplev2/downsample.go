@@ -3,6 +3,13 @@ package downsamplev2
 import (
 	"context"
 	"fmt"
+	"math"
+	"math/rand"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
 	"github.com/go-kit/log"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
@@ -17,18 +24,13 @@ import (
 	"github.com/thanos-io/objstore"
 	"github.com/thanos-io/objstore/providers/filesystem"
 	"github.com/thanos-io/promql-engine/engine"
+
 	"github.com/thanos-io/thanos/pkg/block/metadata"
 	"github.com/thanos-io/thanos/pkg/compact/downsample"
 	"github.com/thanos-io/thanos/pkg/errutil"
 	"github.com/thanos-io/thanos/pkg/query"
 	"github.com/thanos-io/thanos/pkg/runutil"
 	"github.com/thanos-io/thanos/pkg/store"
-	"math"
-	"math/rand"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 )
 
 const (
